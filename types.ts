@@ -149,3 +149,38 @@ export interface ModelPreference {
   videoModel: string;
   agentModel: string;
 }
+
+// Agent / Workflow
+export type WorkspaceMode = 'whiteboard' | 'node';
+export type PromptEnhanceMode = 'smart' | 'style' | 'precise' | 'translate';
+
+export interface PromptEnhanceRequest {
+  prompt: string;
+  mode: PromptEnhanceMode;
+  stylePreset?: string;
+}
+
+export interface PromptEnhanceResult {
+  enhancedPrompt: string;
+  negativePrompt: string;
+  suggestions: string[];
+  notes?: string;
+}
+
+export interface CharacterLockProfile {
+  id: string;
+  name: string;
+  anchorElementId: string;
+  referenceImage: string; // dataURL
+  descriptor: string;
+  createdAt: number;
+  isActive: boolean;
+}
+
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  href: string;
+  mimeType: string;
+  source: 'canvas' | 'upload';
+}

@@ -27,11 +27,13 @@
  */
 
 import { GoogleGenAI, Modality, GenerateContentResponse, GenerateVideosOperation } from "@google/genai";
+import type { PromptEnhanceRequest, PromptEnhanceResult } from "../types";
 
 // 从环境变量获取 API Key
 const API_KEY = process.env.API_KEY;
 let runtimeConfig: {
   apiKey?: string;
+  textModel?: string;
   imageModel?: string;
   textToImageModel?: string;
   videoModel?: string;
@@ -39,6 +41,7 @@ let runtimeConfig: {
 
 export function setGeminiRuntimeConfig(config: {
   apiKey?: string;
+  textModel?: string;
   imageModel?: string;
   textToImageModel?: string;
   videoModel?: string;
@@ -56,6 +59,85 @@ function getApiKey(): string {
 
 function getClient() {
   return new GoogleGenAI({ apiKey: getApiKey() });
+}
+
+function getTextFromResponse(response: GenerateContentResponse): string {
+  if (!response.candidates || response.candidates.length === 0) return "";
+  const parts = response.candidates[0]?.content?.parts ?? [];
+  return parts
+    .map(part => part.text || "")
+    .join("\n")
+    .trim();
+}
+
+function safeParseEnhanceJson(raw: string, fallbackPrompt: string): PromptEnhanceResult {
+  const defaultResult: PromptEnhanceResult = {
+    enhancedPrompt: fallbackPrompt,
+    negativePrompt: "",
+    suggestions: [],
+    notes: raw || "No response content returned by model.",
+  };
+  if (!raw) return defaultResult;
+
+  const clean = raw
+    .replace(/^```json\s*/i, "")
+    .replace(/^```/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(clean) as Partial<PromptEnhanceResult>;
+    return {
+      enhancedPrompt: parsed.enhancedPrompt?.trim() || fallbackPrompt,
+      negativePrompt: parsed.negativePrompt?.trim() || "",
+      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.filter(Boolean).slice(0, 8) : [],
+      notes: parsed.notes?.trim() || "",
+    };
+  } catch {
+    return defaultResult;
+  }
+}
+
+export async function enhancePromptWithGemini(request: PromptEnhanceRequest): Promise<PromptEnhanceResult> {
+  const modeHintMap: Record<PromptEnhanceRequest["mode"], string> = {
+    smart: "Do intelligent enhancement with richer cinematic details, composition, and lighting.",
+    style: `Rewrite with strong style intent. Preferred style preset: ${request.stylePreset || "cinematic"}.`,
+    precise: "Preserve user intent strictly; only optimize clarity and structure.",
+    translate: "Translate and optimize prompt for model friendliness while preserving semantics.",
+  };
+
+  const instruction = [
+    "You are a professional prompt engineer for image/video generation.",
+    "Return ONLY valid JSON with keys: enhancedPrompt, negativePrompt, suggestions, notes.",
+    "Keep enhancedPrompt concise but vivid, no markdown.",
+    "negativePrompt should be a comma-separated phrase list.",
+    "suggestions should be short keyword phrases.",
+    modeHintMap[request.mode],
+  ].join("\n");
+
+  try {
+    const ai = getClient();
+    const model = runtimeConfig.textModel || "gemini-2.5-pro";
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model,
+      contents: {
+        parts: [
+          {
+            text: `${instruction}\n\nUser prompt:\n${request.prompt}`,
+          },
+        ],
+      },
+    });
+
+    const raw = getTextFromResponse(response);
+    return safeParseEnhanceJson(raw, request.prompt);
+  } catch (error) {
+    console.error("Error enhancing prompt with Gemini:", error);
+    if (error instanceof Error) {
+      throw new Error(`Prompt enhancer error: ${error.message}`);
+    }
+    throw new Error("Unknown error while enhancing prompt.");
+  }
 }
 
 /**

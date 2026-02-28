@@ -9,11 +9,18 @@
  * - 生成时将 @ 引用元素作为额外参考图传给 AI
  */
 
-import React, { useRef, useCallback, useMemo } from 'react';
+import React, { useRef, useCallback, useMemo, useState } from 'react';
 import { QuickPrompts } from './QuickPrompts';
 import RichPromptEditor, { type RichPromptEditorHandle } from './RichPromptEditor';
 import type { MentionItem } from './MentionList';
-import type { UserEffect, GenerationMode, Element } from '../types';
+import type {
+    UserEffect,
+    GenerationMode,
+    Element,
+    PromptEnhanceMode,
+    PromptEnhanceResult,
+    CharacterLockProfile,
+} from '../types';
 
 // ---- Props 接口 -------------------------------------------------
 
@@ -42,6 +49,13 @@ interface PromptBarProps {
     canvasElements?: Element[];
     /** 生成时回调：通知父组件本次携带了哪些 @引用元素的 id 列表 */
     onMentionedElementIds?: (ids: string[]) => void;
+    onEnhancePrompt?: (payload: { prompt: string; mode: PromptEnhanceMode; stylePreset?: string }) => Promise<PromptEnhanceResult>;
+    isEnhancingPrompt?: boolean;
+    onLockCharacterFromSelection?: (name?: string) => void;
+    canLockCharacter?: boolean;
+    characterLocks?: CharacterLockProfile[];
+    activeCharacterLockId?: string | null;
+    onSetActiveCharacterLock?: (id: string | null) => void;
 }
 
 // ---- 工具：将画布元素转为 MentionItem ---------------------------
@@ -97,8 +111,19 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     onVideoModelChange,
     canvasElements = [],
     onMentionedElementIds,
+    onEnhancePrompt,
+    isEnhancingPrompt = false,
+    onLockCharacterFromSelection,
+    canLockCharacter = false,
+    characterLocks = [],
+    activeCharacterLockId = null,
+    onSetActiveCharacterLock,
 }) => {
     const editorRef = useRef<RichPromptEditorHandle>(null);
+    const [enhanceMode, setEnhanceMode] = useState<PromptEnhanceMode>('smart');
+    const [stylePreset, setStylePreset] = useState('cinematic');
+    const [enhanceResult, setEnhanceResult] = useState<PromptEnhanceResult | null>(null);
+    const [enhanceError, setEnhanceError] = useState<string | null>(null);
 
     // 将画布元素列表转为 MentionItem（仅对图片以外的非隐藏元素也包含）
     const canvasItems = useMemo<MentionItem[]>(
@@ -139,6 +164,29 @@ export const PromptBar: React.FC<PromptBarProps> = ({
         onMentionedElementIds?.(mentions.map(m => m.id));
         onGenerate();
     }, [isLoading, prompt, onGenerate, onMentionedElementIds]);
+
+    const handleEnhancePrompt = useCallback(async () => {
+        if (!prompt.trim() || !onEnhancePrompt || isEnhancingPrompt) return;
+        setEnhanceError(null);
+        try {
+            const result = await onEnhancePrompt({
+                prompt,
+                mode: enhanceMode,
+                stylePreset: enhanceMode === 'style' ? stylePreset : undefined,
+            });
+            setEnhanceResult(result);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Prompt enhancement failed.';
+            setEnhanceError(message);
+            setEnhanceResult(null);
+        }
+    }, [prompt, onEnhancePrompt, isEnhancingPrompt, enhanceMode, stylePreset]);
+
+    const handleApplyEnhancedPrompt = useCallback(() => {
+        if (!enhanceResult?.enhancedPrompt) return;
+        setPrompt(enhanceResult.enhancedPrompt);
+        setTimeout(() => editorRef.current?.focus(), 10);
+    }, [enhanceResult, setPrompt]);
 
     // ---- 保存效果 -----------------------------------------------
 
@@ -263,6 +311,71 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     </select>
                 )}
 
+                {/* 2.6 Agent controls */}
+                {onEnhancePrompt && (
+                    <>
+                        <select
+                            value={enhanceMode}
+                            onChange={(e) => setEnhanceMode(e.target.value as PromptEnhanceMode)}
+                            className="flex-shrink-0 text-xs bg-neutral-100 rounded-full px-2.5 py-1.5 text-neutral-700 border border-transparent focus:outline-none"
+                            title="润色模式"
+                        >
+                            <option value="smart">智能润色</option>
+                            <option value="style">风格化</option>
+                            <option value="precise">精准优化</option>
+                            <option value="translate">多语言互转</option>
+                        </select>
+                        {enhanceMode === 'style' && (
+                            <select
+                                value={stylePreset}
+                                onChange={(e) => setStylePreset(e.target.value)}
+                                className="flex-shrink-0 text-xs bg-neutral-100 rounded-full px-2.5 py-1.5 text-neutral-700 border border-transparent focus:outline-none"
+                                title="风格预设"
+                            >
+                                <option value="cinematic">电影感</option>
+                                <option value="ink">水墨</option>
+                                <option value="ghibli">吉卜力</option>
+                                <option value="cyberpunk">赛博朋克</option>
+                                <option value="pixar3d">3D 皮克斯</option>
+                            </select>
+                        )}
+                        <button
+                            onClick={handleEnhancePrompt}
+                            disabled={isEnhancingPrompt || !prompt.trim()}
+                            className="flex-shrink-0 px-3 py-1.5 text-xs rounded-full bg-neutral-100 text-neutral-800 hover:bg-neutral-200 disabled:opacity-40 transition-colors"
+                            title="AI 提示词润色"
+                        >
+                            {isEnhancingPrompt ? '润色中...' : '✨ AI润色'}
+                        </button>
+                    </>
+                )}
+
+                {onLockCharacterFromSelection && (
+                    <>
+                        <button
+                            onClick={() => onLockCharacterFromSelection()}
+                            disabled={!canLockCharacter}
+                            className="flex-shrink-0 px-3 py-1.5 text-xs rounded-full bg-neutral-100 text-neutral-800 hover:bg-neutral-200 disabled:opacity-40 transition-colors"
+                            title="从当前选中图片锁定角色"
+                        >
+                            🔒 锁定角色
+                        </button>
+                        {characterLocks.length > 0 && (
+                            <select
+                                value={activeCharacterLockId ?? ''}
+                                onChange={(e) => onSetActiveCharacterLock?.(e.target.value || null)}
+                                className="flex-shrink-0 text-xs bg-neutral-100 rounded-full px-2.5 py-1.5 text-neutral-700 border border-transparent focus:outline-none"
+                                title="角色一致性锁定"
+                            >
+                                <option value="">不使用角色锁定</option>
+                                {characterLocks.map(lock => (
+                                    <option key={lock.id} value={lock.id}>{lock.name}</option>
+                                ))}
+                            </select>
+                        )}
+                    </>
+                )}
+
                 {/* 3. 快捷提示词 */}
                 <QuickPrompts
                     t={t}
@@ -337,6 +450,56 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     )}
                 </button>
             </div>
+
+            {(enhanceResult || enhanceError) && (
+                <div className="mt-2 p-3 rounded-2xl border border-neutral-200 bg-white/95 backdrop-blur-md shadow-sm">
+                    {enhanceError && (
+                        <div className="text-xs text-red-500 mb-2">{enhanceError}</div>
+                    )}
+                    {enhanceResult && (
+                        <>
+                            <div className="text-xs text-neutral-500 mb-1">AI 润色结果</div>
+                            <div className="text-sm text-neutral-900 leading-relaxed mb-2">{enhanceResult.enhancedPrompt}</div>
+                            {enhanceResult.negativePrompt && (
+                                <div className="text-xs text-neutral-600 mb-2">
+                                    <span className="font-medium">负面词：</span>
+                                    {enhanceResult.negativePrompt}
+                                </div>
+                            )}
+                            {enhanceResult.suggestions.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                    {enhanceResult.suggestions.map((item, idx) => (
+                                        <span key={`${item}-${idx}`} className="text-[11px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-700">
+                                            {item}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={handleApplyEnhancedPrompt}
+                                    className="text-xs px-2.5 py-1 rounded-full bg-neutral-900 text-white hover:brightness-110 transition-colors"
+                                >
+                                    ✅ 采用
+                                </button>
+                                <button
+                                    onClick={() => navigator.clipboard?.writeText(enhanceResult.enhancedPrompt)}
+                                    className="text-xs px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-800 hover:bg-neutral-200 transition-colors"
+                                >
+                                    📋 复制
+                                </button>
+                                <button
+                                    onClick={handleEnhancePrompt}
+                                    disabled={isEnhancingPrompt || !prompt.trim()}
+                                    className="text-xs px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-800 hover:bg-neutral-200 disabled:opacity-40 transition-colors"
+                                >
+                                    🔄 再润色
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

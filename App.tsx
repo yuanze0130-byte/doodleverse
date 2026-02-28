@@ -13,13 +13,14 @@ import { LayerPanel } from './components/LayerPanel';
 import { LayerPanelMinimizable } from './components/LayerPanelMinimizable';
 import { LayerToggleButton } from './components/LayerToggleButton';
 import { BoardPanel } from './components/BoardPanel';
-import type { Tool, Point, Element, ImageElement, PathElement, ShapeElement, TextElement, ArrowElement, UserEffect, LineElement, WheelAction, GroupElement, Board, VideoElement, AssetLibrary, AssetCategory, AssetItem, UserApiKey, ModelPreference, AIProvider } from './types';
+import type { Tool, Point, Element, ImageElement, PathElement, ShapeElement, TextElement, ArrowElement, UserEffect, LineElement, WheelAction, GroupElement, Board, VideoElement, AssetLibrary, AssetCategory, AssetItem, UserApiKey, ModelPreference, AIProvider, PromptEnhanceMode, CharacterLockProfile, WorkspaceMode, ChatAttachment } from './types';
 import { AssetLibraryPanel } from './components/AssetLibraryPanel';
 import { InspirationPanel } from './components/InspirationPanel';
 import { RightPanel } from './components/RightPanel';
 import { AssetAddModal } from './components/AssetAddModal';
+import { NodeWorkflowPanel } from './components/NodeWorkflowPanel';
 import { loadAssetLibrary, addAsset, removeAsset, renameAsset } from './utils/assetStorage';
-import { editImage, generateImageFromText, generateVideo, setGeminiRuntimeConfig } from './services/geminiService';
+import { editImage, generateImageFromText, generateVideo, setGeminiRuntimeConfig, enhancePromptWithGemini } from './services/geminiService';
 import { splitImageByBanana, runBananaImageAgent, setBananaRuntimeConfig } from './services/bananaService';
 import { fileToDataUrl } from './utils/fileUtils';
 import { translations } from './translations';
@@ -388,8 +389,11 @@ const App: React.FC = () => {
     const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
     const [selectionBox, setSelectionBox] = useState<Rect | null>(null);
     const [prompt, setPrompt] = useState('');
+    const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
+    const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('whiteboard');
     // @ 引用元素 id 列表（由 PromptBar 在用户点击生成前同步过来）
     const [mentionedElementIds, setMentionedElementIds] = useState<string[]>([]);
+    const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
@@ -453,6 +457,17 @@ const App: React.FC = () => {
             return [];
         }
     });
+    const [characterLocks, setCharacterLocks] = useState<CharacterLockProfile[]>(() => {
+        try {
+            const raw = localStorage.getItem('characterLocks.v1');
+            return raw ? JSON.parse(raw) : [];
+        } catch {
+            return [];
+        }
+    });
+    const [activeCharacterLockId, setActiveCharacterLockId] = useState<string | null>(() => {
+        return localStorage.getItem('characterLocks.activeId') || null;
+    });
     
     const [generationMode, setGenerationMode] = useState<'image' | 'video'>('image');
     const [videoAspectRatio, setVideoAspectRatio] = useState<'16:9' | '9:16'>('16:9');
@@ -495,6 +510,24 @@ const App: React.FC = () => {
         localStorage.setItem('modelPreference.v1', JSON.stringify(modelPreference));
     }, [modelPreference]);
 
+    useEffect(() => {
+        localStorage.setItem('characterLocks.v1', JSON.stringify(characterLocks));
+    }, [characterLocks]);
+
+    useEffect(() => {
+        if (activeCharacterLockId) {
+            localStorage.setItem('characterLocks.activeId', activeCharacterLockId);
+        } else {
+            localStorage.removeItem('characterLocks.activeId');
+        }
+    }, [activeCharacterLockId]);
+
+    useEffect(() => {
+        if (activeCharacterLockId && !characterLocks.some(lock => lock.id === activeCharacterLockId)) {
+            setActiveCharacterLockId(null);
+        }
+    }, [characterLocks, activeCharacterLockId]);
+
     const getDefaultKeyByProvider = useCallback((provider: AIProvider) => {
         const byProvider = userApiKeys.filter(key => key.provider === provider);
         return byProvider.find(key => key.isDefault) || byProvider[0];
@@ -505,6 +538,7 @@ const App: React.FC = () => {
         const bananaKey = getDefaultKeyByProvider('banana');
         setGeminiRuntimeConfig({
             apiKey: googleKey?.key,
+            textModel: modelPreference.textModel,
             imageModel: modelPreference.imageModel.startsWith('gemini') ? modelPreference.imageModel : undefined,
             textToImageModel: modelPreference.imageModel.startsWith('imagen') ? modelPreference.imageModel : undefined,
             videoModel: modelPreference.videoModel.startsWith('veo') ? modelPreference.videoModel : undefined,
@@ -552,6 +586,104 @@ const App: React.FC = () => {
             if (!target) return prev;
             return prev.map(k => k.provider === target.provider ? { ...k, isDefault: k.id === id } : k);
         });
+    }, []);
+
+    const selectedSingleImage = useMemo<ImageElement | null>(() => {
+        if (selectedElementIds.length !== 1) return null;
+        const selected = elements.find(el => el.id === selectedElementIds[0]);
+        return selected && selected.type === 'image' ? selected : null;
+    }, [elements, selectedElementIds]);
+
+    const activeCharacterLock = useMemo(() => {
+        if (!activeCharacterLockId) return null;
+        return characterLocks.find(lock => lock.id === activeCharacterLockId) || null;
+    }, [activeCharacterLockId, characterLocks]);
+
+    const handleLockCharacterFromSelection = useCallback((name?: string) => {
+        if (!selectedSingleImage) {
+            setError('请选择一张图片后再锁定角色。');
+            return;
+        }
+        const lockName = name?.trim() || selectedSingleImage.name || `角色 ${characterLocks.length + 1}`;
+        const descriptor = [
+            `Character lock: ${lockName}.`,
+            'Keep face, hairstyle, costume, body shape, and age consistent across all shots.',
+            'Do not alter identity unless explicitly requested.',
+        ].join(' ');
+
+        const next: CharacterLockProfile = {
+            id: generateId(),
+            name: lockName,
+            anchorElementId: selectedSingleImage.id,
+            referenceImage: selectedSingleImage.href,
+            descriptor,
+            createdAt: Date.now(),
+            isActive: true,
+        };
+
+        setCharacterLocks(prev => [...prev.map(lock => ({ ...lock, isActive: false })), next]);
+        setActiveCharacterLockId(next.id);
+        setError(null);
+    }, [selectedSingleImage, characterLocks.length]);
+
+    const handleEnhancePrompt = useCallback(async (payload: {
+        prompt: string;
+        mode: PromptEnhanceMode;
+        stylePreset?: string;
+    }) => {
+        setIsEnhancingPrompt(true);
+        try {
+            return await enhancePromptWithGemini(payload);
+        } finally {
+            setIsEnhancingPrompt(false);
+        }
+    }, []);
+
+    const handleSetActiveCharacterLock = useCallback((id: string | null) => {
+        setActiveCharacterLockId(id);
+        setCharacterLocks(prev =>
+            prev.map(lock => ({ ...lock, isActive: id ? lock.id === id : false }))
+        );
+    }, []);
+
+    const addChatAttachment = useCallback((payload: Omit<ChatAttachment, 'id'>) => {
+        setChatAttachments(prev => {
+            const exists = prev.some(item => item.href === payload.href);
+            if (exists) return prev;
+            return [...prev, { ...payload, id: generateId() }];
+        });
+    }, []);
+
+    const handleAddAttachmentFromCanvas = useCallback((payload: { id: string; name?: string; href: string; mimeType: string }) => {
+        addChatAttachment({
+            name: payload.name || `Canvas ${payload.id.slice(-4)}`,
+            href: payload.href,
+            mimeType: payload.mimeType,
+            source: 'canvas',
+        });
+    }, [addChatAttachment]);
+
+    const handleAddAttachmentFiles = useCallback(async (files: FileList | File[]) => {
+        const list = Array.from(files).filter(file => file.type.startsWith('image/'));
+        if (list.length === 0) return;
+        try {
+            const dataList = await Promise.all(list.map(fileToDataUrl));
+            dataList.forEach((item, index) => {
+                addChatAttachment({
+                    name: list[index].name || `Upload ${index + 1}`,
+                    href: item.dataUrl,
+                    mimeType: item.mimeType,
+                    source: 'upload',
+                });
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '附件上传失败。';
+            setError(message);
+        }
+    }, [addChatAttachment]);
+
+    const handleRemoveChatAttachment = useCallback((id: string) => {
+        setChatAttachments(prev => prev.filter(item => item.id !== id));
     }, []);
 
     const t = useCallback((key: string, ...args: any[]): any => {
@@ -1661,8 +1793,9 @@ const App: React.FC = () => {
     }, [editingElement?.text, setElements]);
 
 
-    const handleGenerate = async () => {
-        if (!prompt.trim()) {
+    const handleGenerate = async (promptOverride?: string) => {
+        const rawPrompt = (promptOverride ?? prompt).trim();
+        if (!rawPrompt) {
             setError('Please enter a prompt.');
             return;
         }
@@ -1671,10 +1804,28 @@ const App: React.FC = () => {
         setError(null);
         setProgressMessage('Starting generation...');
 
+        const getMimeFromDataUrl = (href: string) => {
+            const match = href.match(/^data:([^;]+);base64,/i);
+            return match?.[1] || 'image/png';
+        };
+        const effectivePrompt = activeCharacterLock
+            ? `${activeCharacterLock.descriptor}\n\n${rawPrompt}`
+            : rawPrompt;
+        const characterReferenceImages = activeCharacterLock
+            ? [{ href: activeCharacterLock.referenceImage, mimeType: getMimeFromDataUrl(activeCharacterLock.referenceImage) }]
+            : [];
+        const attachmentReferenceImages = chatAttachments.map(item => ({ href: item.href, mimeType: item.mimeType }));
+
         if (generationMode === 'video') {
             try {
                 const selectedElements = elements.filter(el => selectedElementIds.includes(el.id));
                 const imageElement = selectedElements.find(el => el.type === 'image') as ImageElement | undefined;
+                const attachmentImage = chatAttachments[0];
+                const baseVideoReference = imageElement
+                    ? { href: imageElement.href, mimeType: imageElement.mimeType }
+                    : attachmentImage
+                        ? { href: attachmentImage.href, mimeType: attachmentImage.mimeType }
+                        : undefined;
                 
                 if (selectedElementIds.length > 1 || (selectedElementIds.length === 1 && !imageElement)) {
                     setError('For video generation, please select a single image or no elements.');
@@ -1683,10 +1834,10 @@ const App: React.FC = () => {
                 }
                 
                 const { videoBlob, mimeType } = await generateVideo(
-                    prompt, 
+                    effectivePrompt, 
                     videoAspectRatio, 
                     (message) => setProgressMessage(message), 
-                    imageElement ? { href: imageElement.href, mimeType: imageElement.mimeType } : undefined
+                    baseVideoReference
                 );
 
                 setProgressMessage('Processing video...');
@@ -1767,7 +1918,7 @@ const App: React.FC = () => {
                     const maskData = await rasterizeMask(maskPaths, baseImage);
                     const result = await editImage(
                         [{ href: baseImage.href, mimeType: baseImage.mimeType }],
-                        prompt,
+                        effectivePrompt,
                         { href: maskData.href, mimeType: maskData.mimeType }
                     );
                     
@@ -1811,7 +1962,7 @@ const App: React.FC = () => {
 
                 // Append @mentioned reference images
                 const mentionRefs = mentionedImageElements.map(el => ({ href: el.href, mimeType: el.mimeType }));
-                const result = await editImage([...imagesToProcess, ...mentionRefs], prompt);
+                const result = await editImage([...imagesToProcess, ...mentionRefs, ...characterReferenceImages], effectivePrompt);
 
                 if (result.newImageBase64 && result.newImageMimeType) {
                     const { newImageBase64, newImageMimeType } = result;
@@ -1846,7 +1997,7 @@ const App: React.FC = () => {
                 // No canvas selection, but user @mentioned image elements → use editImage as reference-guided generation
                 setProgressMessage('Generating with reference images...');
                 const mentionRefs = mentionedImageElements.map(el => ({ href: el.href, mimeType: el.mimeType }));
-                const result = await editImage(mentionRefs, prompt);
+                const result = await editImage([...mentionRefs, ...characterReferenceImages], effectivePrompt);
 
                 if (result.newImageBase64 && result.newImageMimeType) {
                     const { newImageBase64, newImageMimeType } = result;
@@ -1874,7 +2025,9 @@ const App: React.FC = () => {
 
             } else {
                 // Generate from scratch
-                const result = await generateImageFromText(prompt);
+                const result = characterReferenceImages.length > 0
+                    ? await editImage(characterReferenceImages, effectivePrompt)
+                    : await generateImageFromText(effectivePrompt);
 
                 if (result.newImageBase64 && result.newImageMimeType) {
                     const { newImageBase64, newImageMimeType } = result;
@@ -2267,6 +2420,30 @@ const App: React.FC = () => {
                     </button>
                 </div>
             )}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[45]">
+                <div className="inline-flex items-center rounded-full border border-neutral-200/80 bg-white/95 backdrop-blur-md p-1 shadow-lg">
+                    <button
+                        onClick={() => setWorkspaceMode('whiteboard')}
+                        className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                            workspaceMode === 'whiteboard'
+                                ? 'bg-neutral-900 text-white'
+                                : 'text-neutral-700 hover:bg-neutral-100'
+                        }`}
+                    >
+                        🎨 自由白板
+                    </button>
+                    <button
+                        onClick={() => setWorkspaceMode('node')}
+                        className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                            workspaceMode === 'node'
+                                ? 'bg-neutral-900 text-white'
+                                : 'text-neutral-700 hover:bg-neutral-100'
+                        }`}
+                    >
+                        🔗 节点工作流
+                    </button>
+                </div>
+            </div>
             <BoardPanel
                 isOpen={isBoardPanelOpen}
                 onClose={() => setIsBoardPanelOpen(false)}
@@ -2400,6 +2577,39 @@ const App: React.FC = () => {
                     transition: 'padding-right 0.35s cubic-bezier(0.4, 0, 0.2, 1), padding-bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1)'
                 }}
             >
+                {workspaceMode === 'node' && (
+                    <div className="absolute inset-6 z-[35] rounded-3xl border border-neutral-200/70 bg-white/90 backdrop-blur-xl shadow-2xl p-6 flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-neutral-900">节点工作流（Beta）</h3>
+                                <p className="text-xs text-neutral-500">白板与节点共用同一套 Agent 能力，后续可一键封装为模板。</p>
+                            </div>
+                            <button
+                                onClick={() => setWorkspaceMode('whiteboard')}
+                                className="text-xs px-3 py-1.5 rounded-full bg-neutral-100 hover:bg-neutral-200 text-neutral-700"
+                            >
+                                返回白板
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="rounded-2xl border border-neutral-200 p-3">
+                                <div className="text-xs text-neutral-500 mb-1">输入节点</div>
+                                <div className="text-sm text-neutral-800">📝 文本输入 / 🖼 参考图输入</div>
+                            </div>
+                            <div className="rounded-2xl border border-neutral-200 p-3">
+                                <div className="text-xs text-neutral-500 mb-1">Agent 节点</div>
+                                <div className="text-sm text-neutral-800">✨ 提示词润色 / 🔒 角色一致性锁定</div>
+                            </div>
+                            <div className="rounded-2xl border border-neutral-200 p-3">
+                                <div className="text-xs text-neutral-500 mb-1">输出节点</div>
+                                <div className="text-sm text-neutral-800">🎨 图像生成 / 🎬 视频生成</div>
+                            </div>
+                        </div>
+                        <div className="flex-1 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 flex items-center justify-center text-sm text-neutral-500">
+                            节点画布即将接入（当前版本先开放 Agent 能力和模式切换入口）
+                        </div>
+                    </div>
+                )}
                 <svg
                     ref={svgRef}
                     className="w-full h-full"
@@ -2803,6 +3013,13 @@ const App: React.FC = () => {
                             onVideoModelChange={(model) => setModelPreference(prev => ({ ...prev, videoModel: model }))}
                             canvasElements={elements}
                             onMentionedElementIds={setMentionedElementIds}
+                            onEnhancePrompt={handleEnhancePrompt}
+                            isEnhancingPrompt={isEnhancingPrompt}
+                            onLockCharacterFromSelection={handleLockCharacterFromSelection}
+                            canLockCharacter={!!selectedSingleImage}
+                            characterLocks={characterLocks}
+                            activeCharacterLockId={activeCharacterLockId}
+                            onSetActiveCharacterLock={handleSetActiveCharacterLock}
                         />
                     </div>
                 </div>
