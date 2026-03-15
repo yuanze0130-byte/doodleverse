@@ -9,10 +9,7 @@ import { Toolbar } from './components/Toolbar';
 import { PromptBar } from './components/PromptBar';
 import { Loader } from './components/Loader';
 import { CanvasSettings } from './components/CanvasSettings';
-import { LayerPanel } from './components/LayerPanel';
-import { LayerPanelMinimizable } from './components/LayerPanelMinimizable';
-import { LayerToggleButton } from './components/LayerToggleButton';
-import { BoardPanel } from './components/BoardPanel';
+import { WorkspaceSidebar } from './components/WorkspaceSidebar';
 import type { Tool, Point, Element, ImageElement, PathElement, ShapeElement, TextElement, ArrowElement, UserEffect, LineElement, WheelAction, GroupElement, Board, VideoElement, AssetLibrary, AssetCategory, AssetItem, UserApiKey, ModelPreference, AIProvider, AICapability, PromptEnhanceMode, CharacterLockProfile, GenerationHistoryItem } from './types';
 import { AssetLibraryPanel } from './components/AssetLibraryPanel';
 import { InspirationPanel } from './components/InspirationPanel';
@@ -440,8 +437,6 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
-    const [isLayerPanelOpen, setIsLayerPanelOpen] = useState(false);
-    const [isBoardPanelOpen, setIsBoardPanelOpen] = useState(false);
     const [isLayerMinimized, setIsLayerMinimized] = useState(() => {
         const saved = localStorage.getItem('layerPanelMinimized');
         return saved === 'true';
@@ -2617,9 +2612,9 @@ const App: React.FC = () => {
                     </button>
                 </div>
             )}
-            <BoardPanel
-                isOpen={isBoardPanelOpen}
-                onClose={() => setIsBoardPanelOpen(false)}
+            <WorkspaceSidebar
+                isOpen={!isLayerMinimized}
+                onToggle={() => setIsLayerMinimized(prev => !prev)}
                 boards={boards}
                 activeBoardId={activeBoardId}
                 onSwitchBoard={setActiveBoardId}
@@ -2628,6 +2623,30 @@ const App: React.FC = () => {
                 onDuplicateBoard={handleDuplicateBoard}
                 onDeleteBoard={handleDeleteBoard}
                 generateBoardThumbnail={(els) => generateBoardThumbnail(els, activeBoard.canvasBackgroundColor)}
+                elements={elements}
+                selectedElementIds={selectedElementIds}
+                onSelectElement={id => setSelectedElementIds(id ? [id] : [])}
+                onToggleVisibility={id => handlePropertyChange(id, { isVisible: !(elements.find(el => el.id === id)?.isVisible ?? true) })}
+                onToggleLock={id => handlePropertyChange(id, { isLocked: !(elements.find(el => el.id === id)?.isLocked ?? false) })}
+                onRenameElement={(id, name) => handlePropertyChange(id, { name })}
+                onReorder={(draggedId, targetId, position) => {
+                    commitAction(prev => {
+                        const newElements = [...prev];
+                        const draggedIndex = newElements.findIndex(el => el.id === draggedId);
+                        if (draggedIndex === -1) return prev;
+
+                        const [draggedItem] = newElements.splice(draggedIndex, 1);
+                        const targetIndex = newElements.findIndex(el => el.id === targetId);
+                        if (targetIndex === -1) {
+                            newElements.push(draggedItem);
+                            return newElements;
+                        }
+
+                        const finalIndex = position === 'before' ? targetIndex : targetIndex + 1;
+                        newElements.splice(finalIndex, 0, draggedItem);
+                        return newElements;
+                    });
+                }}
             />
             {/* New Right Panel (multi-function: generate + inspiration) */}
             <RightPanel
@@ -2667,36 +2686,28 @@ const App: React.FC = () => {
                 setModelPreference={setModelPreference}
                 t={t}
             />
-            <>
-                <Toolbar
-                    t={t}
-                    activeTool={activeTool}
-                    setActiveTool={setActiveTool}
-                    drawingOptions={drawingOptions}
-                    setDrawingOptions={setDrawingOptions}
-                    onUpload={handleAddImageElement}
-                    isCropping={!!croppingState}
-                    onConfirmCrop={handleConfirmCrop}
-                    onCancelCrop={handleCancelCrop}
-                    onSettingsClick={() => setIsSettingsPanelOpen(true)}
-                    onLayersClick={() => {}}
-                    onBoardsClick={() => setIsBoardPanelOpen(prev => !prev)}
-                    onAssetsClick={() => setIsInspirationMinimized(prev => !prev)}
-                    onUndo={handleUndo}
-                    onRedo={handleRedo}
-                    isLayerPanelExpanded={!isLayerMinimized}
-                    onHeightChange={() => { /* reserved for aligning external buttons under toolbar */ }}
-                    onLeftChange={(left) => setToolbarLeft(left)}
-                    canUndo={historyIndex > 0}
-                    canRedo={historyIndex < history.length - 1}
-                />
-                {/* Layer Toggle Button - positioned at bottom of toolbar column */}
-                <LayerToggleButton
-                    isLayerMinimized={isLayerMinimized}
-                    onToggle={() => setIsLayerMinimized(prev => !prev)}
-                    toolbarLeft={toolbarLeft}
-                />
-            </>
+            <Toolbar
+                t={t}
+                activeTool={activeTool}
+                setActiveTool={setActiveTool}
+                drawingOptions={drawingOptions}
+                setDrawingOptions={setDrawingOptions}
+                onUpload={handleAddImageElement}
+                isCropping={!!croppingState}
+                onConfirmCrop={handleConfirmCrop}
+                onCancelCrop={handleCancelCrop}
+                onSettingsClick={() => setIsSettingsPanelOpen(true)}
+                onLayersClick={() => setIsLayerMinimized(prev => !prev)}
+                onBoardsClick={() => setIsLayerMinimized(prev => !prev)}
+                onAssetsClick={() => setIsInspirationMinimized(prev => !prev)}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                isLayerPanelExpanded={!isLayerMinimized}
+                onHeightChange={() => { /* reserved for aligning external buttons under toolbar */ }}
+                onLeftChange={(left) => setToolbarLeft(left)}
+                canUndo={historyIndex > 0}
+                canRedo={historyIndex < history.length - 1}
+            />
             {addAssetModal?.open && (
                 <AssetAddModal 
                     isOpen={addAssetModal.open}
@@ -2718,36 +2729,6 @@ const App: React.FC = () => {
                     }}
                 />
             )}
-            {/* New Layer Panel (left side, minimizable) */}
-            <LayerPanelMinimizable
-                isMinimized={isLayerMinimized}
-                onToggleMinimize={() => setIsLayerMinimized(prev => !prev)}
-                elements={elements}
-                selectedElementIds={selectedElementIds}
-                onSelectElement={id => setSelectedElementIds(id ? [id] : [])}
-                onToggleVisibility={id => handlePropertyChange(id, { isVisible: !(elements.find(el => el.id === id)?.isVisible ?? true) })}
-                onToggleLock={id => handlePropertyChange(id, { isLocked: !(elements.find(el => el.id === id)?.isLocked ?? false) })}
-                onRenameElement={(id, name) => handlePropertyChange(id, { name })}
-                onReorder={(draggedId, targetId, position) => {
-                    commitAction(prev => {
-                        const newElements = [...prev];
-                        const draggedIndex = newElements.findIndex(el => el.id === draggedId);
-                        if (draggedIndex === -1) return prev;
-
-                        const [draggedItem] = newElements.splice(draggedIndex, 1);
-                        const targetIndex = newElements.findIndex(el => el.id === targetId);
-                        if (targetIndex === -1) {
-                            newElements.push(draggedItem); // Fallback
-                            return newElements;
-                        }
-
-                        const finalIndex = position === 'before' ? targetIndex : targetIndex + 1;
-                        newElements.splice(finalIndex, 0, draggedItem);
-
-                        return newElements;
-                    });
-                }}
-            />
             <div 
                 className="flex-grow relative overflow-hidden"
                 style={{
