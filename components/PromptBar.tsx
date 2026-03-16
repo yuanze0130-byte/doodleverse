@@ -8,6 +8,8 @@ import type {
     PromptEnhanceResult,
     UserEffect,
 } from '../types';
+import type { APIConfig, ModelItem } from '../src/types/api-config';
+import { ConfigSelector } from './ConfigManager/ConfigSelector';
 
 interface PromptBarProps {
     t: (key: string, ...args: any[]) => string;
@@ -48,6 +50,12 @@ interface PromptBarProps {
     characterLocks?: CharacterLockProfile[];
     activeCharacterLockId?: string | null;
     onSetActiveCharacterLock?: (id: string | null) => void;
+    // API 配置管理
+    apiConfigs?: APIConfig[];
+    activeApiConfigId?: string | null;
+    activeApiModelId?: string | null;
+    onApiConfigChange?: (id: string) => void;
+    onApiModelChange?: (modelId: string) => void;
 }
 
 type ExpandPanel = 'mode' | 'model' | 'more' | null;
@@ -167,6 +175,11 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     characterLocks = [],
     activeCharacterLockId = null,
     onSetActiveCharacterLock,
+    apiConfigs = [],
+    activeApiConfigId = null,
+    activeApiModelId = null,
+    onApiConfigChange,
+    onApiModelChange,
 }) => {
     const isDark = theme === 'dark';
     const rootRef = useRef<HTMLDivElement>(null);
@@ -477,6 +490,18 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                 <div className={`relative flex items-center justify-between gap-3 border-t px-3 py-2.5 ${isDark ? 'border-[#2A3140]' : 'border-[#EEF1F5]'}`}>
                     <div className="min-w-0 flex-1 overflow-visible">
                         <div className="flex flex-wrap items-center gap-2">
+                            {/* API 配置选择器 */}
+                            {apiConfigs.length > 0 && onApiConfigChange && onApiModelChange && (
+                                <ConfigSelector
+                                    configs={apiConfigs}
+                                    activeConfigId={activeApiConfigId}
+                                    activeModelId={activeApiModelId}
+                                    onConfigChange={onApiConfigChange}
+                                    onModelChange={onApiModelChange}
+                                    isDark={isDark}
+                                />
+                            )}
+
                             <div className="relative">
                                 <button type="button" onClick={() => setExpandedPanel(prev => (prev === 'mode' ? null : 'mode'))} className={`${triggerClass} ${expandedPanel === 'mode' ? activeTriggerClass : ''}`}>
                                     {getModeLabel(generationMode)}

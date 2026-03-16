@@ -1,6 +1,10 @@
 import React from 'react';
 import type { WheelAction, UserApiKey, ModelPreference, AIProvider, AICapability, ThemeMode } from '../types';
 import { validateApiKey } from '../services/aiGateway';
+import type { APIConfigStore } from '../src/store/api-config-store';
+import type { APIConfig } from '../src/types/api-config';
+import { ConfigList } from './ConfigManager/ConfigList';
+import { ConfigForm } from './ConfigManager/ConfigForm';
 
 interface CanvasSettingsProps {
     isOpen: boolean;
@@ -19,6 +23,7 @@ interface CanvasSettingsProps {
     modelPreference: ModelPreference;
     setModelPreference: (prefs: ModelPreference) => void;
     t: (key: string) => string;
+    apiConfigStore: APIConfigStore;
 }
 
 const providerBaseUrl: Record<AIProvider, string> = {
@@ -61,6 +66,7 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     onSetDefaultApiKey,
     modelPreference,
     setModelPreference,
+    apiConfigStore,
 }) => {
     const [provider, setProvider] = React.useState<AIProvider>('google');
     const [apiKey, setApiKey] = React.useState('');
@@ -70,6 +76,8 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     const [capabilities, setCapabilities] = React.useState<AICapability[]>(['text', 'image', 'video']);
     const [isValidating, setIsValidating] = React.useState(false);
     const [validationResult, setValidationResult] = React.useState<{ ok: boolean; message?: string } | null>(null);
+    const [showConfigForm, setShowConfigForm] = React.useState(false);
+    const [editingConfig, setEditingConfig] = React.useState<APIConfig | null>(null);
 
     if (!isOpen) return null;
 
@@ -279,6 +287,34 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                         </div>
                     </section>
 
+                    {/* ── 新：API 配置管理（CRUD） ───────────────────────── */}
+                    <section className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? 'text-[#667085]' : 'text-[#98A2B3]'}`}>
+                                ⚙️ API 配置管理
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => { setEditingConfig(null); setShowConfigForm(true); }}
+                                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                    isDark
+                                        ? 'border-[#4B5B78] bg-[#1B2330] text-[#B2CCFF] hover:bg-[#252C39]'
+                                        : 'border-[#B2CCFF] bg-[#EEF4FF] text-[#175CD3] hover:bg-[#DBEAFE]'
+                                }`}
+                            >
+                                + 新建
+                            </button>
+                        </div>
+                        <ConfigList
+                            configs={apiConfigStore.configs}
+                            activeConfigId={apiConfigStore.activeConfigId}
+                            onSelect={apiConfigStore.setActiveConfig}
+                            onEdit={(config) => { setEditingConfig(config); setShowConfigForm(true); }}
+                            onDelete={apiConfigStore.deleteConfig}
+                            isDark={isDark}
+                        />
+                    </section>
+
                     <section className="space-y-3">
                         <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? 'text-[#667085]' : 'text-[#98A2B3]'}`}>
                             API 配置
@@ -456,6 +492,17 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                     </section>
                 </div>
             </div>
+
+            {/* ConfigForm 弹窗 */}
+            {showConfigForm && (
+                <ConfigForm
+                    editConfig={editingConfig}
+                    onSave={(draft) => { apiConfigStore.addConfig(draft); }}
+                    onUpdate={(id, patch) => { apiConfigStore.updateConfig(id, patch); }}
+                    onClose={() => { setShowConfigForm(false); setEditingConfig(null); }}
+                    isDark={isDark}
+                />
+            )}
         </div>
     );
 };

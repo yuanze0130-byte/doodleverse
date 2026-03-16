@@ -22,6 +22,8 @@ import { splitImageByBanana, runBananaImageAgent, setBananaRuntimeConfig } from 
 import { enhancePromptWithProvider, generateImageWithProvider, inferProviderFromModel } from './services/aiGateway';
 import { fileToDataUrl } from './utils/fileUtils';
 import { translations } from './translations';
+import { useAPIConfigStore } from './src/store/api-config-store';
+import type { APIConfig } from './src/types/api-config';
 
 const generateId = () => `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -611,6 +613,9 @@ const App: React.FC = () => {
     const [isAutoEnhanceEnabled, setIsAutoEnhanceEnabled] = useState<boolean>(() => {
         try { return localStorage.getItem('autoEnhance.v1') === 'true'; } catch { return false; }
     });
+
+    // ── API 配置管理 Store ──────────────────────────────────────
+    const apiConfigStore = useAPIConfigStore();
 
     // 根据用户已配置的 API Key 动态计算可选模型列表
     const dynamicModelOptions = useMemo(() => {
@@ -2877,6 +2882,7 @@ const App: React.FC = () => {
                 modelPreference={modelPreference}
                 setModelPreference={setModelPreference}
                 t={t}
+                apiConfigStore={apiConfigStore}
             />
             <Toolbar
                 t={t}
@@ -3352,6 +3358,11 @@ const App: React.FC = () => {
                             characterLocks={characterLocks}
                             activeCharacterLockId={activeCharacterLockId}
                             onSetActiveCharacterLock={handleSetActiveCharacterLock}
+                            apiConfigs={apiConfigStore.configs}
+                            activeApiConfigId={apiConfigStore.activeConfigId}
+                            activeApiModelId={apiConfigStore.activeModelId}
+                            onApiConfigChange={apiConfigStore.setActiveConfig}
+                            onApiModelChange={apiConfigStore.setActiveModel}
                         />
                     </div>
                 </div>
