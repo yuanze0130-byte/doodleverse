@@ -14,6 +14,7 @@ import { ConfigSelector } from './ConfigManager/ConfigSelector';
 interface PromptBarProps {
     t: (key: string, ...args: any[]) => string;
     theme: 'light' | 'dark';
+    compactMode?: boolean;
     prompt: string;
     setPrompt: (prompt: string) => void;
     onGenerate: () => void;
@@ -139,6 +140,7 @@ const MenuOptionButton: React.FC<{ label: string; active?: boolean; description?
 export const PromptBar: React.FC<PromptBarProps> = ({
     t,
     theme,
+    compactMode = false,
     prompt,
     setPrompt,
     onGenerate,
@@ -193,15 +195,15 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([]);
     const [isDragActive, setIsDragActive] = useState(false);
 
-    const triggerClass = `inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${
+    const triggerClass = `inline-flex ${compactMode ? 'h-7 gap-1 px-2.5 text-[11px]' : 'h-8 gap-1.5 px-3 text-xs'} items-center rounded-full border font-medium transition ${
         isDark ? 'border-[#2A3140] bg-[#1B2029] text-[#D0D5DD] hover:bg-[#252C39]' : 'border-[#E5E7EB] bg-[#F5F7FA] text-[#344054] hover:border-[#D0D5DD] hover:bg-white'
     }`;
     const activeTriggerClass = isDark ? 'border-[#4B5B78] bg-[#202734] text-white shadow-sm' : 'border-[#D0D5DD] bg-white text-[#111827] shadow-sm';
-    const popoverCardClass = `absolute bottom-full left-0 z-[80] mb-2 min-w-[220px] rounded-[16px] border p-1.5 shadow-[0_20px_50px_rgba(15,23,42,0.14)] ${
+    const popoverCardClass = `absolute bottom-full left-0 z-[80] mb-2 ${compactMode ? 'min-w-[200px] rounded-[14px]' : 'min-w-[220px] rounded-[16px]'} border p-1.5 shadow-[0_20px_50px_rgba(15,23,42,0.14)] ${
         isDark ? 'border-[#2A3140] bg-[#161A22]' : 'border-[#E5E7EB] bg-white'
     }`;
-    const shellClass = isDark ? 'border-[#2A3140] bg-[#12151B] shadow-[0_20px_50px_rgba(0,0,0,0.24)]' : 'border-[#E4E7EC] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.10)]';
-    const textareaClass = isDark ? 'min-h-[48px] w-full resize-none border-none bg-transparent px-0 py-0 text-[14px] leading-6 text-[#F8FAFC] outline-none placeholder:text-[#667085]' : 'min-h-[48px] w-full resize-none border-none bg-transparent px-0 py-0 text-[14px] leading-6 text-[#111827] outline-none placeholder:text-[#C2CAD7]';
+    const shellClass = `${compactMode ? 'rounded-[18px]' : 'rounded-[20px]'} ${isDark ? 'border-[#2A3140] bg-[#12151B] shadow-[0_20px_50px_rgba(0,0,0,0.24)]' : 'border-[#E4E7EC] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.10)]'}`;
+    const textareaClass = isDark ? `${compactMode ? 'min-h-[42px] text-[13px] leading-5' : 'min-h-[48px] text-[14px] leading-6'} w-full resize-none border-none bg-transparent px-0 py-0 text-[#F8FAFC] outline-none placeholder:text-[#667085]` : `${compactMode ? 'min-h-[42px] text-[13px] leading-5' : 'min-h-[48px] text-[14px] leading-6'} w-full resize-none border-none bg-transparent px-0 py-0 text-[#111827] outline-none placeholder:text-[#C2CAD7]`;
 
     const mentionOptions = useMemo<MentionOption[]>(() => canvasElements.filter(element => element.isVisible !== false).map(element => ({
         id: element.id,
@@ -342,6 +344,8 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     accept="image/*"
                     multiple
                     className="hidden"
+                    title="上传参考图"
+                    aria-label="上传参考图"
                     onChange={event => {
                         if (event.target.files?.length) {
                             handleDropFiles(event.target.files);
@@ -358,7 +362,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     </div>
                 )}
 
-                <div className="relative px-3.5 pt-3">
+                <div className={`relative ${compactMode ? 'px-3 pt-2.5' : 'px-3.5 pt-3'}`}>
                     <textarea
                         ref={textareaRef}
                         value={prompt}
@@ -425,7 +429,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     )}
 
                     {(attachments.length > 0 || selectedMentionItems.length > 0) && (
-                        <div className="mt-2.5 space-y-2 pb-1">
+                        <div className={`space-y-2 pb-1 ${compactMode ? 'mt-2' : 'mt-2.5'}`}>
                             {attachments.length > 0 && (
                                 <div className="flex flex-wrap gap-1.5">
                                     {attachments.map(attachment => (
@@ -487,7 +491,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     )}
                 </div>
 
-                <div className={`relative flex items-center justify-between gap-3 border-t px-3 py-2.5 ${isDark ? 'border-[#2A3140]' : 'border-[#EEF1F5]'}`}>
+                <div className={`relative flex items-center justify-between gap-3 border-t ${compactMode ? 'px-2.5 py-2' : 'px-3 py-2.5'} ${isDark ? 'border-[#2A3140]' : 'border-[#EEF1F5]'}`}>
                     <div className="min-w-0 flex-1 overflow-visible">
                         <div className="flex flex-wrap items-center gap-2">
                             {/* API 配置选择器 */}

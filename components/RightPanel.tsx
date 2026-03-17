@@ -7,6 +7,11 @@ interface RightPanelProps {
     theme: 'light' | 'dark';
     isMinimized: boolean;
     onToggleMinimize: () => void;
+    outerGap: number;
+    defaultWidth: number;
+    minWidth: number;
+    widthCap: number;
+    compactMode: boolean;
     library: AssetLibrary;
     generationHistory: GenerationHistoryItem[];
     attachments: ChatAttachment[];
@@ -61,6 +66,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     theme,
     isMinimized,
     onToggleMinimize,
+    outerGap,
+    defaultWidth,
+    minWidth,
+    widthCap,
+    compactMode,
     library,
     generationHistory,
     attachments,
@@ -72,6 +82,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     onWidthChange,
 }) => {
     const isDark = theme === 'dark';
+    const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
     const [activeTab, setActiveTab] = useState<RightPanelTab>('generate');
     const [category, setCategory] = useState<AssetCategory>('character');
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,7 +90,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     const [prompt, setPrompt] = useState('');
     const [panelWidth, setPanelWidth] = useState(() => {
         const saved = localStorage.getItem('rightPanelWidth');
-        return saved ? parseInt(saved, 10) : 380;
+        return saved ? parseInt(saved, 10) : defaultWidth;
     });
     const [isResizing, setIsResizing] = useState(false);
     const [resizeStartX, setResizeStartX] = useState(0);
@@ -94,6 +105,21 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     const items = useMemo(() => library[category], [category, library]);
 
     useEffect(() => {
+        const handleResize = () => setViewportWidth(window.innerWidth);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    useEffect(() => {
+        const maxWidth = Math.min(widthCap, viewportWidth - outerGap * 2);
+        const safeMinWidth = Math.min(minWidth, maxWidth);
+        setPanelWidth(prev => {
+            const candidate = Number.isNaN(prev) ? defaultWidth : prev;
+            return Math.min(maxWidth, Math.max(safeMinWidth, candidate));
+        });
+    }, [defaultWidth, minWidth, outerGap, viewportWidth, widthCap]);
+
+    useEffect(() => {
         localStorage.setItem('rightPanelWidth', panelWidth.toString());
     }, [panelWidth]);
 
@@ -106,9 +132,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         const handlePointerMove = (event: PointerEvent) => {
             const dx = resizeStartX - event.clientX;
-            const minWidth = 340;
-            const maxWidth = Math.min(620, window.innerWidth - 160);
-            setPanelWidth(Math.min(maxWidth, Math.max(minWidth, resizeStartWidth + dx)));
+            const nextMinWidth = Math.min(minWidth, widthCap, window.innerWidth - outerGap * 2);
+            const maxWidth = Math.min(widthCap, window.innerWidth - outerGap * 2);
+            setPanelWidth(Math.min(maxWidth, Math.max(nextMinWidth, resizeStartWidth + dx)));
         };
 
         const handlePointerUp = () => setIsResizing(false);
@@ -119,7 +145,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
         };
-    }, [isResizing, resizeStartWidth, resizeStartX]);
+    }, [isResizing, minWidth, outerGap, resizeStartWidth, resizeStartX, widthCap]);
 
     useEffect(() => {
         if (editingId && editInputRef.current) {
@@ -203,11 +229,14 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 type="button"
                 onClick={onToggleMinimize}
                 style={{
+                    top: `${outerGap}px`,
+                    right: `${outerGap}px`,
                     opacity: isMinimized ? 1 : 0,
                     pointerEvents: isMinimized ? 'auto' : 'none',
-                    transition: 'opacity 0.2s ease-out',
+                    transition: 'opacity 0.2s ease-out, transform 0.28s ease-out',
+                    transform: isMinimized ? 'translateY(0)' : 'translateY(-6px)',
                 }}
-                className={`theme-aware fixed right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg ${
+                className={`theme-aware fixed z-20 flex h-10 w-10 items-center justify-center rounded-xl border shadow-lg ${
                     isDark ? 'border-[#2A3140] bg-[#12151B] text-[#98A2B3] hover:text-white' : 'border-neutral-200 bg-white text-neutral-600 hover:text-neutral-900'
                 }`}
                 title="打开侧边栏"
@@ -220,29 +249,31 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
             <div
                 style={{
-                    right: '16px',
+                    top: `${outerGap}px`,
+                    bottom: `${outerGap}px`,
+                    right: `${outerGap}px`,
                     width: `${panelWidth}px`,
-                    transform: isMinimized ? 'scaleX(0.005)' : 'scaleX(1)',
+                    transform: isMinimized ? 'translateX(18px) scale(0.96)' : 'translateX(0) scale(1)',
                     transformOrigin: 'right center',
                     opacity: isMinimized ? 0 : 1,
-                    transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease-out',
+                    transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease-out, width 0.25s ease-out',
                     pointerEvents: isMinimized ? 'none' : 'auto',
                 }}
-                className={`theme-aware fixed bottom-4 top-4 z-[30] flex flex-col overflow-hidden rounded-[28px] border shadow-2xl backdrop-blur-xl ${
-                    isDark ? 'border-[#2A3140] bg-[#12151B]/96' : 'border-neutral-200/60 bg-white/96'
-                }`}
+                className={`compact-right-panel theme-aware fixed z-[30] flex flex-col overflow-hidden border shadow-2xl backdrop-blur-xl ${
+                    compactMode ? 'rounded-[24px]' : 'rounded-[28px]'
+                } ${isDark ? 'border-[#2A3140] bg-[#12151B]/96' : 'border-neutral-200/60 bg-white/96'}`}
             >
                 <div
-                    className="absolute left-0 top-0 z-10 h-full w-1 cursor-ew-resize transition-colors hover:bg-blue-400"
+                    className={`absolute left-0 top-0 z-10 h-full cursor-ew-resize transition-colors hover:bg-blue-400/70 ${compactMode ? 'w-1' : 'w-1.5'}`}
                     onPointerDown={handleResizePointerDown}
                 />
 
-                <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
-                    <div className="flex items-center gap-2">
+                <div className={`flex items-center justify-between border-b border-neutral-200 ${compactMode ? 'px-3 py-2.5' : 'px-4 py-3'}`}>
+                    <div className={`flex items-center ${compactMode ? 'gap-1.5' : 'gap-2'}`}>
                         <button
                             type="button"
                             onClick={() => setActiveTab('generate')}
-                            className={`rounded-xl px-3 py-1.5 text-sm transition-all ${
+                            className={`rounded-xl ${compactMode ? 'px-2.5 py-1.5 text-[13px]' : 'px-3 py-1.5 text-sm'} transition-all ${
                                 activeTab === 'generate' ? 'bg-neutral-900 text-white' : 'text-neutral-600 hover:bg-neutral-100'
                             }`}
                         >
@@ -251,7 +282,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         <button
                             type="button"
                             onClick={() => setActiveTab('inspiration')}
-                            className={`rounded-xl px-3 py-1.5 text-sm transition-all ${
+                            className={`rounded-xl ${compactMode ? 'px-2.5 py-1.5 text-[13px]' : 'px-3 py-1.5 text-sm'} transition-all ${
                                 activeTab === 'inspiration' ? 'bg-neutral-900 text-white' : 'text-neutral-600 hover:bg-neutral-100'
                             }`}
                         >
@@ -261,7 +292,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     <button
                         type="button"
                         onClick={onToggleMinimize}
-                        className="rounded-xl border border-neutral-200 p-2.5 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+                        className={`rounded-xl border border-neutral-200 ${compactMode ? 'p-2' : 'p-2.5'} text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900`}
                         title="收起"
                     >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -273,9 +304,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
                 <div className="min-h-0 flex-1 overflow-hidden">
                     {activeTab === 'generate' && (
-                        <div className="flex h-full min-h-0 flex-col gap-4 p-4">
+                        <div className={`flex h-full min-h-0 flex-col ${compactMode ? 'gap-3 p-3' : 'gap-4 p-4'}`}>
                             <div
-                                className={`relative rounded-[28px] border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 ${
+                                className={`relative rounded-[26px] border ${compactMode ? 'p-3.5' : 'p-4'} shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all duration-200 ${
                                     isUploadDragActive
                                         ? 'scale-[1.01] border-blue-300 bg-blue-50 shadow-[0_18px_40px_rgba(59,130,246,0.12)]'
                                         : 'border-neutral-200 bg-neutral-50'
@@ -317,14 +348,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                         </div>
                                     </div>
                                 )}
-                                <div className="flex items-start gap-3">
+
+                                <div className={`flex items-start ${compactMode ? 'gap-2.5' : 'gap-3'}`}>
                                     <button
                                         type="button"
                                         onClick={() => fileInputRef.current?.click()}
-                                        className="flex h-[84px] w-[66px] shrink-0 flex-col items-center justify-center rounded-[20px] border border-neutral-200 bg-white text-neutral-500 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:text-neutral-800"
+                                        className={`flex shrink-0 flex-col items-center justify-center rounded-[20px] border border-neutral-200 bg-white text-neutral-500 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:text-neutral-800 ${compactMode ? 'h-[76px] w-[60px]' : 'h-[84px] w-[66px]'}`}
                                         title="导入参考图"
                                     >
-                                        <span className="text-2xl leading-none">+</span>
+                                        <span className={`${compactMode ? 'text-xl' : 'text-2xl'} leading-none`}>+</span>
                                         <span className="mt-2 text-[11px]">导图</span>
                                     </button>
 
@@ -333,7 +365,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                         value={prompt}
                                         onChange={event => setPrompt(event.target.value)}
                                         placeholder="输入描述，右侧只保留轻量参考图导入。"
-                                        className="min-h-[84px] flex-1 resize-none border-none bg-transparent px-1 py-1 text-[15px] leading-7 text-neutral-800 outline-none placeholder:text-neutral-400"
+                                        className={`flex-1 resize-none border-none bg-transparent px-1 py-1 text-neutral-800 outline-none placeholder:text-neutral-400 ${compactMode ? 'min-h-[76px] text-[14px] leading-6' : 'min-h-[84px] text-[15px] leading-7'}`}
                                     />
                                 </div>
 
@@ -349,14 +381,16 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                             event.target.value = '';
                                         }
                                     }}
+                                    title="上传参考图"
+                                    aria-label="上传参考图"
                                 />
 
                                 {attachments.length > 0 && (
-                                    <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                                    <div className={`mt-4 flex gap-2 overflow-x-auto pb-1 ${compactMode ? '[&>div]:h-14 [&>div]:w-14' : ''}`}>
                                         {attachments.map(attachment => (
                                             <div
                                                 key={attachment.id}
-                                                className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                                                className="group relative shrink-0 overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
                                             >
                                                 <img
                                                     src={attachment.href}
@@ -376,7 +410,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                     </div>
                                 )}
 
-                                <div className="mt-4 flex items-center justify-between gap-3">
+                                <div className={`mt-4 flex items-center justify-between gap-3 ${compactMode ? 'flex-col items-stretch' : ''}`}>
                                     <div className="text-xs text-neutral-500">
                                         参考图会自动作为生成输入使用
                                     </div>
@@ -385,7 +419,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                         type="button"
                                         onClick={handleGenerate}
                                         disabled={!prompt.trim()}
-                                        className="flex items-center justify-center rounded-full bg-neutral-900 px-4 py-2 text-sm text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                                        className={`flex items-center justify-center rounded-full bg-neutral-900 text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300 ${compactMode ? 'w-full px-4 py-2.5 text-sm' : 'px-4 py-2 text-sm'}`}
                                     >
                                         生成
                                     </button>
@@ -407,7 +441,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                     {generationHistory.length === 0 ? (
                                         <EmptyHistory />
                                     ) : (
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className={`grid ${compactMode ? 'grid-cols-1 gap-2.5' : 'grid-cols-2 gap-3'}`}>
                                             {generationHistory.map(item => (
                                                 <div
                                                     key={item.id}
@@ -419,7 +453,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                                         <img
                                                             src={item.dataUrl}
                                                             alt={item.name || item.prompt}
-                                                            className="aspect-square w-full object-cover"
+                                                            className={`w-full object-cover ${compactMode ? 'aspect-[4/3]' : 'aspect-square'}`}
                                                         />
                                                     </div>
                                                     <div className="px-1 pb-1 pt-2">
@@ -442,12 +476,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
                     {activeTab === 'inspiration' && (
                         <div className="flex h-full min-h-0 flex-col">
-                            <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+                            <div className={`flex items-center justify-between border-b border-neutral-200 ${compactMode ? 'px-3 py-2.5' : 'px-4 py-3'}`}>
                                 <CategoryTabs value={category} onChange={setCategory} />
                                 <span className="text-xs text-neutral-500">{items.length} 项</span>
                             </div>
 
-                            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                            <div className={`min-h-0 flex-1 overflow-y-auto ${compactMode ? 'p-2.5' : 'p-3'}`}>
                                 {items.length === 0 ? (
                                     <div className="flex h-full items-center justify-center text-neutral-400">
                                         <div className="text-center">
@@ -460,11 +494,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="columns-2 gap-3">
+                                    <div className={compactMode ? 'space-y-2.5' : 'columns-2 gap-3'}>
                                         {items.map(item => (
                                             <div
                                                 key={item.id}
-                                                className="group relative mb-3 inline-block w-full break-inside-avoid overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 transition-all hover:shadow-md"
+                                                className={`group relative break-inside-avoid overflow-hidden border border-neutral-200 bg-neutral-50 transition-all hover:shadow-md ${compactMode ? 'rounded-[18px]' : 'mb-3 inline-block w-full rounded-lg'}`}
                                                 draggable
                                                 onDragStart={event => handleLibraryDragStart(event, item)}
                                             >
@@ -490,6 +524,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                                                             className="min-w-0 flex-1 rounded-lg border border-blue-400 bg-white/95 px-2 py-1 text-xs outline-none shadow-lg"
                                                             placeholder="输入名称"
                                                             aria-label="素材名称"
+                                                            title="素材名称"
                                                         />
                                                     </div>
                                                 ) : (

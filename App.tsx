@@ -10,7 +10,7 @@ import { PromptBar } from './components/PromptBar';
 import { Loader } from './components/Loader';
 import { CanvasSettings } from './components/CanvasSettings';
 import { WorkspaceSidebar } from './components/WorkspaceSidebar';
-import type { Tool, Point, Element, ImageElement, PathElement, ShapeElement, TextElement, ArrowElement, UserEffect, LineElement, WheelAction, GroupElement, Board, VideoElement, AssetLibrary, AssetCategory, AssetItem, UserApiKey, ModelPreference, AIProvider, AICapability, PromptEnhanceMode, CharacterLockProfile, GenerationHistoryItem, ThemeMode } from './types';
+import type { Tool, Point, Element, ImageElement, PathElement, ShapeElement, TextElement, ArrowElement, UserEffect, LineElement, WheelAction, GroupElement, Board, VideoElement, AssetLibrary, AssetCategory, AssetItem, UserApiKey, ModelPreference, AIProvider, AICapability, PromptEnhanceMode, CharacterLockProfile, GenerationHistoryItem, ThemeMode, ChatAttachment } from './types';
 import { AssetLibraryPanel } from './components/AssetLibraryPanel';
 import { InspirationPanel } from './components/InspirationPanel';
 import { RightPanel } from './components/RightPanel';
@@ -23,7 +23,9 @@ import { enhancePromptWithProvider, generateImageWithProvider, inferProviderFrom
 import { fileToDataUrl } from './utils/fileUtils';
 import { translations } from './translations';
 import { useAPIConfigStore } from './src/store/api-config-store';
+import { saveKeysEncrypted, loadKeysDecrypted, clearAllKeyData, migrateLegacyKeys } from './utils/keyVault';
 import type { APIConfig } from './src/types/api-config';
+import { getCompactChromeMetrics } from './utils/uiScale';
 
 const generateId = () => `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -501,6 +503,7 @@ const App: React.FC = () => {
     });
     const [toolbarLeft, setToolbarLeft] = useState(68); // 瀹搞儱鍙块弽蹇曟畱 left 娴ｅ秶鐤?
     const [rightPanelWidth, setRightPanelWidth] = useState(2); // 閸欏厖鏅堕棃銏℃緲鐎圭偤妾€硅棄瀹抽敍鍫㈡暏閿?PromptBar 閸氬本顒為敓?
+    const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
     const [wheelAction, setWheelAction] = useState<WheelAction>('zoom');
     const [croppingState, setCroppingState] = useState<{ elementId: string; originalElement: ImageElement; cropBox: Rect } | null>(null);
     const [alignmentGuides, setAlignmentGuides] = useState<Guide[]>([]);
@@ -518,6 +521,14 @@ const App: React.FC = () => {
     useEffect(() => {
         localStorage.setItem('inspirationPanelMinimized', isInspirationMinimized.toString());
     }, [isInspirationMinimized]);
+
+    useEffect(() => {
+        const handleResize = () => setViewportWidth(window.innerWidth);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    const chromeMetrics = useMemo(() => getCompactChromeMetrics(viewportWidth), [viewportWidth]);
 
     useEffect(() => {
         localStorage.setItem(BOARDS_STORAGE_KEY, JSON.stringify(boards));
@@ -564,18 +575,10 @@ const App: React.FC = () => {
     useEffect(() => {
         localStorage.setItem('themeMode.v1', themeMode);
     }, [themeMode]);
-    const [userApiKeys, setUserApiKeys] = useState<UserApiKey[]>(() => {
-        try {
-            const raw = localStorage.getItem('userApiKeys.v1');
-            const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed)
-                ? parsed
-                    .map(normalizeApiKeyEntry)
-                    .filter((item): item is UserApiKey => !!item)
-                : [];
-        } catch {
-            return [];
-        }
+    const [userApiKeys, setUserApiKeys] = useState<UserApiKey[]>([]);
+    const [apiKeysLoaded, setApiKeysLoaded] = useState(false);
+    const [clearKeysOnExit, setClearKeysOnExit] = useState<boolean>(() => {
+        try { return localStorage.getItem('security.clearKeysOnExit') === 'true'; } catch { return false; }
     });
     const [modelPreference, setModelPreference] = useState<ModelPreference>(() => {
         try {
@@ -682,9 +685,40 @@ const App: React.FC = () => {
         }
     }, [userEffects]);
 
+    // 从加密存储异步加载 API Key（首次挂载 + 兼容迁移旧明文）
     useEffect(() => {
-        localStorage.setItem('userApiKeys.v1', JSON.stringify(userApiKeys));
-    }, [userApiKeys]);
+        let cancelled = false;
+        (async () => {
+            await migrateLegacyKeys();
+            const keys = await loadKeysDecrypted<Partial<UserApiKey>[]>();
+            if (cancelled) return;
+            const normalized = (keys || [])
+                .map(normalizeApiKeyEntry)
+                .filter((item): item is UserApiKey => !!item);
+            setUserApiKeys(normalized);
+            setApiKeysLoaded(true);
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
+    // 持久化 API Key（加密写入）
+    useEffect(() => {
+        if (!apiKeysLoaded) return; // 防止初始空数组覆盖加密数据
+        saveKeysEncrypted(userApiKeys);
+    }, [userApiKeys, apiKeysLoaded]);
+
+    // 持久化 clearKeysOnExit 设置
+    useEffect(() => {
+        localStorage.setItem('security.clearKeysOnExit', clearKeysOnExit.toString());
+    }, [clearKeysOnExit]);
+
+    // 退出时清除 API Key
+    useEffect(() => {
+        if (!clearKeysOnExit) return;
+        const handleBeforeUnload = () => { clearAllKeyData(); };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [clearKeysOnExit]);
 
     useEffect(() => {
         localStorage.setItem('modelPreference.v1', JSON.stringify(modelPreference));
@@ -2814,6 +2848,8 @@ const App: React.FC = () => {
             <WorkspaceSidebar
                 isOpen={!isLayerMinimized}
                 onToggle={() => setIsLayerMinimized(prev => !prev)}
+                outerGap={chromeMetrics.outerGap}
+                panelWidth={chromeMetrics.sidebarWidth}
                 boards={boards}
                 activeBoardId={activeBoardId}
                 onSwitchBoard={setActiveBoardId}
@@ -2852,6 +2888,11 @@ const App: React.FC = () => {
                 theme={resolvedTheme}
                 isMinimized={isInspirationMinimized}
                 onToggleMinimize={() => setIsInspirationMinimized(prev => !prev)}
+                outerGap={chromeMetrics.outerGap}
+                defaultWidth={chromeMetrics.rightPanelDefaultWidth}
+                minWidth={chromeMetrics.rightPanelMinWidth}
+                widthCap={chromeMetrics.rightPanelWidthCap}
+                compactMode={chromeMetrics.isTablet}
                 library={assetLibrary}
                 generationHistory={generationHistory}
                 attachments={chatAttachments}
@@ -2883,10 +2924,16 @@ const App: React.FC = () => {
                 setModelPreference={setModelPreference}
                 t={t}
                 apiConfigStore={apiConfigStore}
+                clearKeysOnExit={clearKeysOnExit}
+                setClearKeysOnExit={setClearKeysOnExit}
             />
             <Toolbar
                 t={t}
                 theme={resolvedTheme}
+                compactScale={chromeMetrics.toolbarScale}
+                topOffset={chromeMetrics.outerGap}
+                leftClosed={chromeMetrics.toolbarLeftClosed}
+                leftOpen={chromeMetrics.toolbarLeftOpen}
                 activeTool={activeTool}
                 setActiveTool={setActiveTool}
                 drawingOptions={drawingOptions}
@@ -2929,10 +2976,10 @@ const App: React.FC = () => {
                 />
             )}
             <div 
-                className="flex-grow relative overflow-hidden"
+                className="compact-canvas-stage flex-grow relative overflow-hidden"
                 style={{
-                    paddingRight: `${rightPanelWidth + 32}px`,
-                    paddingBottom: croppingState ? '0px' : '96px',
+                    paddingRight: chromeMetrics.isTablet ? `${chromeMetrics.outerGap}px` : `${rightPanelWidth + chromeMetrics.promptSideInset}px`,
+                    paddingBottom: croppingState ? '0px' : `${chromeMetrics.canvasBottomInset}px`,
                     transition: 'padding-right 0.35s cubic-bezier(0.4, 0, 0.2, 1), padding-bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1)'
                 }}
             >
@@ -3311,17 +3358,18 @@ const App: React.FC = () => {
             </div>
             {!croppingState && (
                 <div 
-                    className="absolute bottom-0 left-0 right-0 z-[40] transition-all duration-300 ease-out flex justify-center pointer-events-none"
+                    className="compact-prompt-dock absolute bottom-0 left-0 right-0 z-[40] transition-all duration-300 ease-out flex justify-center pointer-events-none"
                     style={{
-                        paddingLeft: isLayerMinimized ? '16px' : '260px',
-                        paddingRight: `${rightPanelWidth + 24}px`,
-                        paddingBottom: '18px'
+                        paddingLeft: chromeMetrics.isTablet ? `${chromeMetrics.promptSideInset}px` : `${isLayerMinimized ? chromeMetrics.outerGap : chromeMetrics.sidebarWidth + chromeMetrics.outerGap + 8}px`,
+                        paddingRight: chromeMetrics.isTablet ? `${chromeMetrics.promptSideInset}px` : `${rightPanelWidth + chromeMetrics.promptSideInset}px`,
+                        paddingBottom: `${chromeMetrics.promptDockBottom}px`
                     }}
                 >
-                    <div className="pointer-events-auto w-full max-w-3xl transition-transform hover:-translate-y-0.5 duration-300 drop-shadow-xl">
+                    <div className="compact-prompt-dock__inner pointer-events-auto w-full transition-transform hover:-translate-y-0.5 duration-300 drop-shadow-xl" style={{ maxWidth: `${chromeMetrics.promptMaxWidth}px` }}>
                         <PromptBar 
                             t={t}
                             theme={resolvedTheme}
+                            compactMode={chromeMetrics.isTablet}
                             prompt={prompt} 
                             setPrompt={setPrompt} 
                             onGenerate={() => handleGenerate(undefined, 'prompt')} 

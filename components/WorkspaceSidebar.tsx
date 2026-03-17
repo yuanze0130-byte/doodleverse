@@ -4,6 +4,8 @@ import type { Board, Element } from '../types';
 interface WorkspaceSidebarProps {
     isOpen: boolean;
     onToggle: () => void;
+    outerGap: number;
+    panelWidth: number;
     boards: Board[];
     activeBoardId: string;
     onSwitchBoard: (id: string) => void;
@@ -176,6 +178,8 @@ const BoardRow: React.FC<{
                                 setIsEditing(false);
                             }
                         }}
+                        title="重命名画板"
+                        aria-label="重命名画板"
                         className="w-full border-none bg-transparent text-sm font-medium outline-none"
                     />
                 ) : (
@@ -192,6 +196,8 @@ const BoardRow: React.FC<{
                         event.stopPropagation();
                         setMenuOpen(prev => !prev);
                     }}
+                    title="画板操作"
+                    aria-label="画板操作"
                     className={`rounded-xl p-2 transition ${
                         isActive ? 'hover:bg-white/10' : 'hover:bg-white'
                     } ${menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
@@ -292,6 +298,8 @@ const LayerRow: React.FC<{
                                 setIsEditing(false);
                             }
                         }}
+                        title="重命名图层"
+                        aria-label="重命名图层"
                         className="w-full border-none bg-transparent text-sm outline-none"
                     />
                 ) : (
@@ -335,6 +343,8 @@ const LayerRow: React.FC<{
 export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
     isOpen,
     onToggle,
+    outerGap,
+    panelWidth,
     boards,
     activeBoardId,
     onSwitchBoard,
@@ -414,9 +424,13 @@ export const WorkspaceSidebar: React.FC<WorkspaceSidebarProps> = ({
 
     return (
         <div
-            className="theme-aware fixed inset-y-4 left-4 z-[45] w-64 overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-[0_30px_70px_rgba(15,23,42,0.18)] transition-all duration-300"
+            className="compact-sidebar-panel theme-aware fixed z-[45] overflow-hidden rounded-[26px] border border-neutral-200 bg-white shadow-[0_24px_56px_rgba(15,23,42,0.14)] transition-all duration-300"
             style={{
-                transform: isOpen ? 'translateX(0)' : 'translateX(calc(-100% - 20px))',
+                top: `${outerGap}px`,
+                bottom: `${outerGap}px`,
+                left: `${outerGap}px`,
+                width: `${panelWidth}px`,
+                transform: isOpen ? 'translateX(0) scale(1)' : 'translateX(calc(-100% - 12px)) scale(0.97)',
                 opacity: isOpen ? 1 : 0,
                 pointerEvents: isOpen ? 'auto' : 'none',
             }}

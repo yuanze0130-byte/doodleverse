@@ -148,3 +148,63 @@ body {
 :root[data-theme='dark'] .theme-aware textarea::placeholder {
     color: var(--text-subtle);
 }
+
+.compact-canvas-stage {
+    transition:
+        padding-right 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+        padding-bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.compact-sidebar-panel,
+.compact-right-panel,
+.compact-prompt-dock__inner {
+    will-change: transform, opacity;
+}
+
+.compact-sidebar-panel,
+.compact-right-panel {
+    backface-visibility: hidden;
+}
+
+.compact-prompt-dock {
+    animation: compactDockFloat 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.compact-prompt-dock__inner {
+    animation: compactDockLift 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes compactDockFloat {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes compactDockLift {
+    from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.985);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .compact-sidebar-panel,
+    .compact-right-panel,
+    .compact-prompt-dock,
+    .compact-prompt-dock__inner,
+    .compact-canvas-stage {
+        animation: none !important;
+        transition-duration: 0.01ms !important;
+    }
+}
