@@ -1,10 +1,6 @@
 import React from 'react';
-import type { WheelAction, UserApiKey, ModelPreference, AIProvider, AICapability, ThemeMode } from '../types';
-import { validateApiKey } from '../services/aiGateway';
-import type { APIConfigStore } from '../src/store/api-config-store';
-import type { APIConfig } from '../src/types/api-config';
-import { ConfigList } from './ConfigManager/ConfigList';
-import { ConfigForm } from './ConfigManager/ConfigForm';
+import type { WheelAction, UserApiKey, ModelPreference, AIProvider, AICapability, ThemeMode, ModelItem } from '../types';
+import { DEFAULT_PROVIDER_MODELS, validateApiKey, inferProviderFromKey, inferCapabilitiesByProvider, PROVIDER_LABELS } from '../services/aiGateway';
 
 interface CanvasSettingsProps {
     isOpen: boolean;
@@ -24,7 +20,6 @@ interface CanvasSettingsProps {
     modelPreference: ModelPreference;
     setModelPreference: (prefs: ModelPreference) => void;
     t: (key: string) => string;
-    apiConfigStore: APIConfigStore;
     clearKeysOnExit: boolean;
     setClearKeysOnExit: (v: boolean) => void;
 }
@@ -36,6 +31,11 @@ const providerBaseUrl: Record<AIProvider, string> = {
     stability: 'https://api.stability.ai/v1',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     banana: 'https://api.banana.dev/v1/vision',
+    deepseek: 'https://api.deepseek.com/v1',
+    siliconflow: 'https://api.siliconflow.cn/v1',
+    keling: 'https://api.klingai.com/v1',
+    flux: 'https://api.bfl.ml/v1',
+    midjourney: 'https://api.midjourney.com/v1',
     custom: '',
 };
 
@@ -46,11 +46,10 @@ const capabilityLabels: Record<AICapability, string> = {
     agent: 'Agent',
 };
 
-const modelOptions = {
-    text: ['gemini-2.5-pro', 'gpt-4o-mini', 'claude-3-5-sonnet', 'qwen-max'],
-    image: ['gemini-2.5-flash-image', 'imagen-4.0-generate-001', 'dall-e-3', 'sdxl'],
-    video: ['veo-2.0-generate-001'],
-    agent: ['banana-vision-v1'],
+const ensureModelOption = (options: string[], model?: string) => {
+    const trimmed = model?.trim();
+    if (!trimmed) return options;
+    return options.includes(trimmed) ? options : [trimmed, ...options];
 };
 
 export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
@@ -70,7 +69,6 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     onSetDefaultApiKey,
     modelPreference,
     setModelPreference,
-    apiConfigStore,
     clearKeysOnExit,
     setClearKeysOnExit,
 }) => {
@@ -82,12 +80,34 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     const [capabilities, setCapabilities] = React.useState<AICapability[]>(['text', 'image', 'video']);
     const [isValidating, setIsValidating] = React.useState(false);
     const [validationResult, setValidationResult] = React.useState<{ ok: boolean; message?: string } | null>(null);
-    const [showConfigForm, setShowConfigForm] = React.useState(false);
-    const [editingConfig, setEditingConfig] = React.useState<APIConfig | null>(null);
     // 当前正在编辑的 API Key（null = 新增模式）
     const [editingKeyId, setEditingKeyId] = React.useState<string | null>(null);
     // 控制 API Key 添加/编辑弹窗
     const [showKeyModal, setShowKeyModal] = React.useState(false);
+    // 模型管理
+    const [editModels, setEditModels] = React.useState<ModelItem[]>([]);
+    const [editDefaultModel, setEditDefaultModel] = React.useState('');
+    const [newModelId, setNewModelId] = React.useState('');
+    const [extraConfig, setExtraConfig] = React.useState<Record<string, string>>({});
+    // 批量测试状态
+    const [batchTestResults, setBatchTestResults] = React.useState<Record<string, { ok: boolean; message?: string }>>({});
+    const [isBatchTesting, setIsBatchTesting] = React.useState(false);
+
+    const modelOptions = React.useMemo(() => ({
+        text: ensureModelOption([
+            ...(DEFAULT_PROVIDER_MODELS.google?.text || []),
+            ...(DEFAULT_PROVIDER_MODELS.openai?.text || []),
+            ...(DEFAULT_PROVIDER_MODELS.anthropic?.text || []),
+            ...(DEFAULT_PROVIDER_MODELS.qwen?.text || []),
+        ], modelPreference.textModel),
+        image: ensureModelOption([
+            ...(DEFAULT_PROVIDER_MODELS.google?.image || []),
+            ...(DEFAULT_PROVIDER_MODELS.openai?.image || []),
+            ...(DEFAULT_PROVIDER_MODELS.stability?.image || []),
+        ], modelPreference.imageModel),
+        video: ensureModelOption([...(DEFAULT_PROVIDER_MODELS.google?.video || [])], modelPreference.videoModel),
+        agent: ensureModelOption([...(DEFAULT_PROVIDER_MODELS.banana?.agent || [])], modelPreference.agentModel),
+    }), [modelPreference.agentModel, modelPreference.imageModel, modelPreference.textModel, modelPreference.videoModel]);
 
     if (!isOpen) return null;
 
@@ -119,12 +139,22 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     const handleProviderChange = (next: AIProvider) => {
         setProvider(next);
         setBaseUrl(providerBaseUrl[next]);
-        if (next === 'banana') setCapabilities(['agent']);
-        if (next === 'anthropic' || next === 'qwen') setCapabilities(['text']);
-        if (next === 'stability') setCapabilities(['image']);
-        if (next === 'google') setCapabilities(['text', 'image', 'video']);
-        if (next === 'openai') setCapabilities(['text', 'image']);
-        if (next === 'custom') setCapabilities(['text', 'image', 'video']);
+        setCapabilities(inferCapabilitiesByProvider(next));
+        // 自动填充该 provider 的预设模型
+        const pm = DEFAULT_PROVIDER_MODELS[next];
+        if (pm) {
+            const models: ModelItem[] = [
+                ...(pm.text || []).map(id => ({ id, name: id })),
+                ...(pm.image || []).map(id => ({ id, name: id })),
+                ...(pm.video || []).map(id => ({ id, name: id })),
+                ...(pm.agent || []).map(id => ({ id, name: id })),
+            ];
+            setEditModels(models);
+            setEditDefaultModel(models[0]?.id || '');
+        } else {
+            setEditModels([]);
+            setEditDefaultModel('');
+        }
     };
 
     const handleSaveKey = async () => {
@@ -139,6 +169,10 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
 
         if (!result.ok) return; // 验证失败不保存
 
+        const modelsToSave = editModels.length > 0 ? editModels : undefined;
+        const customModelsToSave = editModels.map(m => m.id);
+        const extraToSave = Object.keys(extraConfig).length > 0 ? extraConfig : undefined;
+
         if (editingKeyId) {
             // 编辑模式：更新已有 Key
             onUpdateApiKey(editingKeyId, {
@@ -148,6 +182,10 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                 baseUrl: baseUrl.trim() || undefined,
                 name: displayName.trim() || undefined,
                 status: 'ok',
+                models: modelsToSave,
+                customModels: customModelsToSave.length > 0 ? customModelsToSave : undefined,
+                defaultModel: editDefaultModel || undefined,
+                extraConfig: extraToSave,
             });
         } else {
             // 新增模式
@@ -159,6 +197,10 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                 name: displayName.trim() || undefined,
                 status: 'ok',
                 isDefault: false,
+                models: modelsToSave,
+                customModels: customModelsToSave.length > 0 ? customModelsToSave : undefined,
+                defaultModel: editDefaultModel || undefined,
+                extraConfig: extraToSave,
             });
         }
         handleCancelEdit();
@@ -171,7 +213,10 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
         setApiKey(item.key);
         setBaseUrl(item.baseUrl || providerBaseUrl[item.provider]);
         setDisplayName(item.name || '');
-        setCapabilities(item.capabilities?.length ? [...item.capabilities] : ['text', 'image', 'video']);
+        setCapabilities(item.capabilities?.length ? [...item.capabilities] : inferCapabilitiesByProvider(item.provider));
+        setEditModels(item.models || (item.customModels || []).map(id => ({ id, name: id })));
+        setEditDefaultModel(item.defaultModel || '');
+        setExtraConfig(item.extraConfig || {});
         setValidationResult(null);
         setShowKeyModal(true);
     };
@@ -181,8 +226,134 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
         setEditingKeyId(null);
         setApiKey('');
         setDisplayName('');
+        setEditModels([]);
+        setEditDefaultModel('');
+        setNewModelId('');
+        setExtraConfig({});
         setValidationResult(null);
         setShowKeyModal(false);
+    };
+
+    /** API Key 粘贴自动检测 Provider */
+    const handleKeyPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+        const pasted = e.clipboardData.getData('text');
+        if (pasted) {
+            const detected = inferProviderFromKey(pasted);
+            if (detected && detected !== provider) {
+                handleProviderChange(detected);
+            }
+        }
+    };
+
+    /** 添加模型到当前编辑列表 */
+    const handleAddModel = () => {
+        const id = newModelId.trim();
+        if (!id || editModels.some(m => m.id === id)) return;
+        const next = [...editModels, { id, name: id }];
+        setEditModels(next);
+        if (!editDefaultModel) setEditDefaultModel(id);
+        setNewModelId('');
+    };
+
+    /** 删除模型 */
+    const handleRemoveModel = (id: string) => {
+        const next = editModels.filter(m => m.id !== id);
+        setEditModels(next);
+        if (editDefaultModel === id) setEditDefaultModel(next[0]?.id || '');
+    };
+
+    /** 导出所有 API Key 配置为 JSON */
+    const handleExportKeys = () => {
+        const exportData = userApiKeys.map(k => ({
+            provider: k.provider,
+            name: k.name,
+            baseUrl: k.baseUrl,
+            capabilities: k.capabilities,
+            customModels: k.customModels,
+            defaultModel: k.defaultModel,
+            models: k.models,
+            extraConfig: k.extraConfig,
+            key: '***', // 不导出明文 key
+        }));
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `makinglovart-api-configs-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    /** 导入 JSON 配置文件 */
+    const handleImportKeys = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = async (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                if (!Array.isArray(parsed)) throw new Error('格式错误');
+                for (const item of parsed) {
+                    if (!item.provider || !item.key || item.key === '***') continue;
+                    onAddApiKey({
+                        provider: item.provider,
+                        capabilities: item.capabilities || inferCapabilitiesByProvider(item.provider),
+                        key: item.key,
+                        baseUrl: item.baseUrl,
+                        name: item.name,
+                        status: 'unknown',
+                        isDefault: false,
+                        customModels: item.customModels,
+                        defaultModel: item.defaultModel,
+                        models: item.models,
+                        extraConfig: item.extraConfig,
+                    });
+                }
+            } catch {
+                alert('导入失败：文件格式不正确');
+            }
+        };
+        input.click();
+    };
+
+    /** 带 Key 导出（含明文，用于设备迁移） */
+    const handleExportKeysWithSecrets = () => {
+        if (!confirm('导出将包含明文 API Key，请妥善保管导出文件！')) return;
+        const exportData = userApiKeys.map(k => ({
+            provider: k.provider,
+            name: k.name,
+            key: k.key,
+            baseUrl: k.baseUrl,
+            capabilities: k.capabilities,
+            customModels: k.customModels,
+            defaultModel: k.defaultModel,
+            models: k.models,
+            extraConfig: k.extraConfig,
+        }));
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `makinglovart-api-configs-full-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    /** 一键测试所有 Key */
+    const handleBatchTest = async () => {
+        setIsBatchTesting(true);
+        setBatchTestResults({});
+        const results: Record<string, { ok: boolean; message?: string }> = {};
+        for (const item of userApiKeys) {
+            const result = await validateApiKey(item.provider, item.key, item.baseUrl);
+            results[item.id] = result;
+            onUpdateApiKey(item.id, { status: result.ok ? 'ok' : 'error' });
+            setBatchTestResults({ ...results });
+        }
+        setIsBatchTesting(false);
     };
 
     return (
@@ -329,48 +500,53 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                         </div>
                     </section>
 
-                    {/* ── 新：API 配置管理（CRUD） ───────────────────────── */}
+                    {/* ── 统一 API 配置管理 ───────────────────────── */}
                     <section className="space-y-3">
                         <div className="flex items-center justify-between">
                             <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? 'text-[#667085]' : 'text-[#98A2B3]'}`}>
-                                ⚙️ API 配置管理
+                                🔑 API 配置
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => { setEditingConfig(null); setShowConfigForm(true); }}
-                                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                                    isDark
-                                        ? 'border-[#4B5B78] bg-[#1B2330] text-[#B2CCFF] hover:bg-[#252C39]'
-                                        : 'border-[#B2CCFF] bg-[#EEF4FF] text-[#175CD3] hover:bg-[#DBEAFE]'
-                                }`}
-                            >
-                                + 新建
-                            </button>
-                        </div>
-                        <ConfigList
-                            configs={apiConfigStore.configs}
-                            activeConfigId={apiConfigStore.activeConfigId}
-                            onSelect={apiConfigStore.setActiveConfig}
-                            onEdit={(config) => { setEditingConfig(config); setShowConfigForm(true); }}
-                            onDelete={apiConfigStore.deleteConfig}
-                            isDark={isDark}
-                        />
-                    </section>
-
-                    <section className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${isDark ? 'text-[#667085]' : 'text-[#98A2B3]'}`}>
-                                API 配置
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleImportKeys}
+                                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                                        isDark ? 'border-[#2A3140] text-[#98A2B3] hover:bg-[#252C39]' : 'border-[#E4E7EC] text-[#667085] hover:bg-[#F2F4F7]'
+                                    }`}
+                                >
+                                    导入
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleExportKeysWithSecrets}
+                                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                                        isDark ? 'border-[#2A3140] text-[#98A2B3] hover:bg-[#252C39]' : 'border-[#E4E7EC] text-[#667085] hover:bg-[#F2F4F7]'
+                                    }`}
+                                >
+                                    导出
+                                </button>
+                                {userApiKeys.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={handleBatchTest}
+                                        disabled={isBatchTesting}
+                                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                                            isDark ? 'border-[#2A3140] text-[#98A2B3] hover:bg-[#252C39]' : 'border-[#E4E7EC] text-[#667085] hover:bg-[#F2F4F7]'
+                                        } disabled:opacity-50`}
+                                    >
+                                        {isBatchTesting ? '测试中...' : '全部测试'}
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { setEditingKeyId(null); setApiKey(''); setDisplayName(''); setProvider('google'); setBaseUrl(providerBaseUrl.google); setCapabilities(inferCapabilitiesByProvider('google')); handleProviderChange('google'); setValidationResult(null); setShowKeyModal(true); }}
+                                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                        isDark ? 'border-[#4B5B78] bg-[#1B2330] text-[#B2CCFF] hover:bg-[#252C39]' : 'border-[#B2CCFF] bg-[#EEF4FF] text-[#175CD3] hover:bg-[#DBEAFE]'
+                                    }`}
+                                >
+                                    + 添加 API Key
+                                </button>
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => { setEditingKeyId(null); setApiKey(''); setDisplayName(''); setProvider('google'); setBaseUrl(providerBaseUrl.google); setCapabilities(['text', 'image', 'video']); setValidationResult(null); setShowKeyModal(true); }}
-                                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                                    isDark ? 'border-[#4B5B78] bg-[#1B2330] text-[#B2CCFF] hover:bg-[#252C39]' : 'border-[#B2CCFF] bg-[#EEF4FF] text-[#175CD3] hover:bg-[#DBEAFE]'
-                                }`}
-                            >
-                                + 添加 API Key
-                            </button>
                         </div>
 
                         <div className="space-y-2">
@@ -394,7 +570,7 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                                                 <span className={`inline-block h-2 w-2 rounded-full ${
                                                     item.status === 'ok' ? 'bg-green-500' : item.status === 'error' ? 'bg-red-400' : 'bg-yellow-400'
                                                 }`} title={item.status === 'ok' ? '已验证' : item.status === 'error' ? '验证失败' : '未验证'} />
-                                                <span className={`truncate text-sm font-medium ${isDark ? 'text-[#F3F4F6]' : 'text-[#101828]'}`}>{item.name || item.provider}</span>
+                                                <span className={`truncate text-sm font-medium ${isDark ? 'text-[#F3F4F6]' : 'text-[#101828]'}`}>{item.name || PROVIDER_LABELS[item.provider] || item.provider}</span>
                                                 {editingKeyId === item.id && (
                                                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
                                                         isDark ? 'bg-[#1B2330] text-[#7CB4FF]' : 'bg-[#EFF6FF] text-[#1D4ED8]'
@@ -513,22 +689,11 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                 </div>
             </div>
 
-            {/* ConfigForm 弹窗 */}
-            {showConfigForm && (
-                <ConfigForm
-                    editConfig={editingConfig}
-                    onSave={(draft) => { apiConfigStore.addConfig(draft); }}
-                    onUpdate={(id, patch) => { apiConfigStore.updateConfig(id, patch); }}
-                    onClose={() => { setShowConfigForm(false); setEditingConfig(null); }}
-                    isDark={isDark}
-                />
-            )}
-
-            {/* API Key 添加/编辑弹窗 */}
+            {/* API Key 添加/编辑弹窗（统一版） */}
             {showKeyModal && (
                 <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={handleCancelEdit}>
                     <div
-                        className={`relative w-[90%] max-w-[440px] rounded-[24px] border p-6 shadow-[0_40px_100px_rgba(0,0,0,0.2)] ${
+                        className={`relative max-h-[85vh] w-[90%] max-w-[500px] overflow-y-auto rounded-[24px] border p-6 shadow-[0_40px_100px_rgba(0,0,0,0.2)] ${
                             isDark ? 'border-[#2A3140] bg-[#12151B]' : 'border-[#E4E7EC] bg-white'
                         }`}
                         onClick={(e) => e.stopPropagation()}
@@ -545,13 +710,9 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                         <div className="space-y-3">
                             <div className="grid gap-3 md:grid-cols-2">
                                 <select value={provider} onChange={(event) => handleProviderChange(event.target.value as AIProvider)} className={inputClass}>
-                                    <option value="google">Google</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="anthropic">Anthropic</option>
-                                    <option value="qwen">Qwen</option>
-                                    <option value="stability">Stability</option>
-                                    <option value="banana">Banana</option>
-                                    <option value="custom">Custom</option>
+                                    {Object.entries(PROVIDER_LABELS).map(([key, label]) => (
+                                        <option key={key} value={key}>{label}</option>
+                                    ))}
                                 </select>
                                 <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="备注名称（可选）" className={inputClass} />
                             </div>
@@ -560,8 +721,9 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                                 <input
                                     value={apiKey}
                                     onChange={(event) => setApiKey(event.target.value)}
+                                    onPaste={handleKeyPaste}
                                     type={showKey ? 'text' : 'password'}
-                                    placeholder="粘贴 API Key"
+                                    placeholder="粘贴 API Key（自动识别 Provider）"
                                     className={inputClass}
                                     autoFocus
                                 />
@@ -593,6 +755,53 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                                     ))}
                                 </div>
                             </div>
+
+                            {/* 模型管理 */}
+                            <div>
+                                <div className={`mb-2 text-sm font-medium ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>模型列表</div>
+                                {editModels.length > 0 && (
+                                    <div className="mb-2 flex flex-wrap gap-1.5">
+                                        {editModels.map(m => (
+                                            <span key={m.id} className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] ${
+                                                editDefaultModel === m.id
+                                                    ? isDark ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40' : 'bg-blue-50 text-blue-600 border border-blue-200'
+                                                    : isDark ? 'bg-[#1B2029] text-[#98A2B3]' : 'bg-[#F2F4F7] text-[#667085]'
+                                            }`}>
+                                                <button type="button" onClick={() => setEditDefaultModel(m.id)} title="设为默认">{m.name || m.id}</button>
+                                                <button type="button" onClick={() => handleRemoveModel(m.id)} className="ml-0.5 opacity-60 hover:opacity-100">×</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex gap-2">
+                                    <input
+                                        value={newModelId}
+                                        onChange={(e) => setNewModelId(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddModel(); } }}
+                                        placeholder="输入模型 ID 并回车添加"
+                                        className={inputClass}
+                                    />
+                                    <button type="button" onClick={handleAddModel} className={chipClass}>添加</button>
+                                </div>
+                                {editModels.length > 0 && (
+                                    <div className={`mt-1.5 text-[11px] ${isDark ? 'text-[#667085]' : 'text-[#98A2B3]'}`}>
+                                        点击模型名称设为默认（蓝色高亮），点击 × 删除
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* extraConfig（如 Google Veo projectId） */}
+                            {(provider === 'keling' || provider === 'custom') && (
+                                <div>
+                                    <div className={`mb-2 text-sm font-medium ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>额外配置</div>
+                                    <input
+                                        value={extraConfig.projectId || ''}
+                                        onChange={(e) => setExtraConfig({ ...extraConfig, projectId: e.target.value })}
+                                        placeholder="Project ID（可选）"
+                                        className={inputClass}
+                                    />
+                                </div>
+                            )}
 
                             <div className="flex items-center gap-2 pt-1">
                                 <button

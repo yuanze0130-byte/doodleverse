@@ -142,8 +142,14 @@ export interface GenerationHistoryItem {
 
 // API Key & Model Preferences
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type AIProvider = 'openai' | 'anthropic' | 'google' | 'stability' | 'qwen' | 'banana' | 'custom';
+export type AIProvider = 'openai' | 'anthropic' | 'google' | 'stability' | 'qwen' | 'banana' | 'deepseek' | 'siliconflow' | 'keling' | 'flux' | 'midjourney' | 'custom';
 export type AICapability = 'text' | 'image' | 'video' | 'agent';
+
+/** 模型条目（用于结构化展示） */
+export interface ModelItem {
+  id: string;
+  name: string;
+}
 
 export interface UserApiKey {
   id: string;
@@ -158,6 +164,10 @@ export interface UserApiKey {
   customModels?: string[];
   /** 这些自定义模型中用户设定的默认模型 */
   defaultModel?: string;
+  /** 结构化模型列表（可选，优先于 customModels 展示） */
+  models?: ModelItem[];
+  /** Provider 特有的额外配置（如 Google Veo 的 projectId） */
+  extraConfig?: Record<string, string>;
   createdAt: number;
   updatedAt: number;
 }

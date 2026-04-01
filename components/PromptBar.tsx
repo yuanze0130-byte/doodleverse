@@ -9,7 +9,6 @@ import type {
     UserApiKey,
     UserEffect,
 } from '../types';
-import type { APIConfig, ModelItem } from '../src/types/api-config';
 import { ConfigSelector } from './ConfigManager/ConfigSelector';
 import RichPromptEditor, { type RichPromptEditorHandle } from './RichPromptEditor';
 import type { MentionItem } from './MentionList';
@@ -55,8 +54,8 @@ interface PromptBarProps {
     characterLocks?: CharacterLockProfile[];
     activeCharacterLockId?: string | null;
     onSetActiveCharacterLock?: (id: string | null) => void;
-    // API 配置管理
-    apiConfigs?: APIConfig[];
+    // API 配置管理（统一使用 UserApiKey）
+    apiConfigs?: UserApiKey[];
     activeApiConfigId?: string | null;
     activeApiModelId?: string | null;
     onApiConfigChange?: (id: string) => void;

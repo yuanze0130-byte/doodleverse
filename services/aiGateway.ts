@@ -1,5 +1,66 @@
-import type { AIProvider, PromptEnhanceRequest, PromptEnhanceResult, UserApiKey } from '../types';
+import type { AICapability, AIProvider, PromptEnhanceRequest, PromptEnhanceResult, UserApiKey } from '../types';
 import { enhancePromptWithGemini, generateImageFromText, validateGeminiApiKey } from './geminiService';
+
+type ProviderModelMap = { text: string[]; image: string[]; video: string[]; agent?: string[] };
+
+export const DEFAULT_PROVIDER_MODELS: Partial<Record<AIProvider, ProviderModelMap>> = {
+    google: {
+        text: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+        image: ['gemini-2.5-flash-image', 'imagen-4.0-generate-001'],
+        video: ['veo-2.0-generate-001'],
+    },
+    openai: {
+        text: ['gpt-4o-mini'],
+        image: ['dall-e-3'],
+        video: [],
+    },
+    anthropic: {
+        text: ['claude-3-5-sonnet'],
+        image: [],
+        video: [],
+    },
+    qwen: {
+        text: ['qwen-max'],
+        image: [],
+        video: [],
+    },
+    stability: {
+        text: [],
+        image: ['sdxl'],
+        video: [],
+    },
+    banana: {
+        text: [],
+        image: [],
+        video: [],
+        agent: ['banana-vision-v1'],
+    },
+    deepseek: {
+        text: ['deepseek-chat', 'deepseek-reasoner'],
+        image: [],
+        video: [],
+    },
+    siliconflow: {
+        text: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen2.5-72B-Instruct'],
+        image: ['stabilityai/stable-diffusion-3-5-large'],
+        video: [],
+    },
+    keling: {
+        text: [],
+        image: ['kling-v1'],
+        video: ['kling-video-v1'],
+    },
+    flux: {
+        text: [],
+        image: ['flux-1.1-pro', 'flux-1-schnell'],
+        video: [],
+    },
+    midjourney: {
+        text: [],
+        image: ['midjourney-v6.1'],
+        video: [],
+    },
+};
 
 /**
  * 通用 API Key 验证 — 根据 provider 调用对应的验证逻辑
@@ -10,7 +71,7 @@ export async function validateApiKey(provider: AIProvider, apiKey: string, baseU
     }
 
     // OpenAI-compatible: 调用 /models 接口
-    if (provider === 'openai' || provider === 'qwen' || provider === 'custom') {
+    if (provider === 'openai' || provider === 'qwen' || provider === 'deepseek' || provider === 'siliconflow' || provider === 'custom') {
         try {
             const url = (baseUrl || DEFAULT_BASE_URLS[provider]).replace(/\/$/, '');
             const res = await fetch(`${url}/models`, {
@@ -46,7 +107,23 @@ export async function validateApiKey(provider: AIProvider, apiKey: string, baseU
         }
     }
 
-    // Stability / Banana: 简单格式校验
+    // Keling / Flux / Midjourney: OpenAI-compatible 验证
+    if (provider === 'keling' || provider === 'flux' || provider === 'midjourney') {
+        try {
+            const url = (baseUrl || DEFAULT_BASE_URLS[provider]).replace(/\/$/, '');
+            const res = await fetch(`${url}/models`, {
+                method: 'GET',
+                headers: { Authorization: `Bearer ${apiKey}` },
+            });
+            if (res.ok) return { ok: true };
+            if (res.status === 401 || res.status === 403) return { ok: false, message: 'API Key 无效或权限不足' };
+            return { ok: true, message: '已保存（无法确认在线状态，但格式正确）' };
+        } catch (err) {
+            return { ok: false, message: err instanceof Error ? err.message : '网络错误' };
+        }
+    }
+
+    // Stability / Banana / 其他: 简单格式校验
     if (apiKey.length < 10) return { ok: false, message: 'API Key 太短' };
     return { ok: true, message: '已保存（格式校验通过，未做在线验证）' };
 }
@@ -58,7 +135,56 @@ const DEFAULT_BASE_URLS: Record<AIProvider, string> = {
     stability: 'https://api.stability.ai/v1',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     banana: 'https://api.banana.dev/v1/vision',
+    deepseek: 'https://api.deepseek.com/v1',
+    siliconflow: 'https://api.siliconflow.cn/v1',
+    keling: 'https://api.klingai.com/v1',
+    flux: 'https://api.bfl.ml/v1',
+    midjourney: 'https://api.midjourney.com/v1',
     custom: '',
+};
+
+/**
+ * 根据 API Key 格式自动推断 Provider（用于粘贴时自动识别）
+ */
+export function inferProviderFromKey(apiKey: string): AIProvider | null {
+    const trimmed = apiKey.trim();
+    if (/^AIzaSy/i.test(trimmed)) return 'google';
+    if (/^sk-ant-/i.test(trimmed)) return 'anthropic';
+    if (/^sk-proj-/i.test(trimmed) || /^sk-[a-zA-Z0-9]{20,}$/.test(trimmed)) return 'openai';
+    if (/^sk-[a-f0-9]{32,}$/i.test(trimmed)) return 'deepseek';
+    if (/^sa-/i.test(trimmed)) return 'stability';
+    if (/^sk-sf/i.test(trimmed)) return 'siliconflow';
+    return null;
+}
+
+/**
+ * Provider 默认 capabilities 推断
+ */
+export function inferCapabilitiesByProvider(provider: AIProvider): import('../types').AICapability[] {
+    const caps = DEFAULT_PROVIDER_MODELS[provider];
+    if (!caps) return ['text', 'image'];
+    const result: import('../types').AICapability[] = [];
+    if (caps.text?.length) result.push('text');
+    if (caps.image?.length) result.push('image');
+    if (caps.video?.length) result.push('video');
+    if (caps.agent?.length) result.push('agent');
+    return result.length ? result : ['text'];
+}
+
+/** Provider 可读标签 */
+export const PROVIDER_LABELS: Record<AIProvider, string> = {
+    google: 'Google Gemini',
+    openai: 'OpenAI',
+    anthropic: 'Anthropic Claude',
+    stability: 'Stability AI',
+    qwen: 'Qwen 通义千问',
+    banana: 'Banana',
+    deepseek: 'DeepSeek 深度求索',
+    siliconflow: 'SiliconFlow 硅基流动',
+    keling: 'Keling 可灵',
+    flux: 'Flux (BFL)',
+    midjourney: 'Midjourney',
+    custom: '自定义',
 };
 
 function getBaseUrl(provider: AIProvider, key?: UserApiKey) {
@@ -70,6 +196,30 @@ function requireApiKey(provider: AIProvider, key?: UserApiKey) {
         throw new Error(`未配置 ${provider} 的 API Key。请先在设置中保存。`);
     }
     return key.key;
+}
+
+function normalizeModelName(model: string): string {
+    return model.trim().toLowerCase();
+}
+
+export function inferCapabilityFromModel(model: string): AICapability | undefined {
+    const normalized = normalizeModelName(model);
+    if (!normalized) return undefined;
+    if (/^veo([-.\d]|$)/.test(normalized)) return 'video';
+    if (/^banana/.test(normalized)) return 'agent';
+    if (/^(imagen|dall-e|gpt-image|sdxl|stable-diffusion)/.test(normalized)) return 'image';
+    if (/^gemini/.test(normalized)) return normalized.includes('image') ? 'image' : 'text';
+    if (/^(gpt|o\d|claude|qwen)/.test(normalized)) return 'text';
+    return undefined;
+}
+
+export function isGoogleImageEditModel(model: string): boolean {
+    const normalized = normalizeModelName(model);
+    return inferProviderFromModel(model) === 'google' && /^gemini/.test(normalized) && normalized.includes('image');
+}
+
+export function isGoogleTextToImageModel(model: string): boolean {
+    return inferProviderFromModel(model) === 'google' && /^imagen/.test(normalizeModelName(model));
 }
 
 function inferPromptModeHint(request: PromptEnhanceRequest) {
@@ -116,12 +266,18 @@ function safeParsePromptResult(raw: string, fallbackPrompt: string): PromptEnhan
 }
 
 export function inferProviderFromModel(model: string): AIProvider {
-    if (/^(gemini|imagen|veo)/i.test(model)) return 'google';
-    if (/^(dall-e|gpt-image|gpt-4o)/i.test(model)) return 'openai';
+    const normalized = normalizeModelName(model);
+    if (/^(gemini|imagen|veo)/.test(normalized)) return 'google';
+    if (/^(dall-e|gpt-image|gpt-4o|gpt-4\.1|o\d)/.test(normalized)) return 'openai';
     if (/^claude/i.test(model)) return 'anthropic';
     if (/^qwen/i.test(model)) return 'qwen';
     if (/^(sdxl|stable-diffusion)/i.test(model)) return 'stability';
     if (/^banana/i.test(model)) return 'banana';
+    if (/^deepseek/i.test(model)) return 'deepseek';
+    if (/^(siliconflow|deepseek-ai|Qwen)/i.test(model)) return 'siliconflow';
+    if (/^(kling|keling)/i.test(model)) return 'keling';
+    if (/^flux/i.test(model)) return 'flux';
+    if (/^midjourney/i.test(model)) return 'midjourney';
     return 'custom';
 }
 

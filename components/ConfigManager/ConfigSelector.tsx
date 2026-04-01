@@ -1,12 +1,41 @@
 /**
  * ConfigSelector — 输入框旁的配置 + 模型联动选择器
  *
+ * 统一使用 UserApiKey 作为数据源（不再依赖 APIConfig）。
  * 两个紧凑下拉：选配置 → 选模型
  * 切换配置时自动更新模型列表并选中默认模型。
  */
 
 import React, { useRef, useState, useEffect } from 'react';
-import type { APIConfig, ModelItem } from '../../src/types/api-config';
+import type { UserApiKey, ModelItem } from '../../types';
+import { PROVIDER_LABELS, DEFAULT_PROVIDER_MODELS } from '../../services/aiGateway';
+
+interface ConfigSelectorProps {
+  configs: UserApiKey[];
+  activeConfigId: string | null;
+  activeModelId: string | null;
+  onConfigChange: (id: string) => void;
+  onModelChange: (modelId: string) => void;
+  isDark: boolean;
+}
+
+/** 从 UserApiKey 中提取可用模型列表 */
+function getModelsForKey(key: UserApiKey): ModelItem[] {
+  if (key.models && key.models.length > 0) return key.models;
+  if (key.customModels && key.customModels.length > 0) {
+    return key.customModels.map(id => ({ id, name: id }));
+  }
+  // 回退到 provider 默认模型
+  const pm = DEFAULT_PROVIDER_MODELS[key.provider];
+  if (!pm) return [];
+  const all = [
+    ...(pm.text || []),
+    ...(pm.image || []),
+    ...(pm.video || []),
+    ...(pm.agent || []),
+  ];
+  return all.map(id => ({ id, name: id }));
+}
 
 interface ConfigSelectorProps {
   configs: APIConfig[];
@@ -30,7 +59,7 @@ export const ConfigSelector: React.FC<ConfigSelectorProps> = ({
   const rootRef = useRef<HTMLDivElement>(null);
 
   const activeConfig = configs.find(c => c.id === activeConfigId);
-  const models: ModelItem[] = activeConfig?.models ?? [];
+  const models: ModelItem[] = activeConfig ? getModelsForKey(activeConfig) : [];
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -86,7 +115,7 @@ export const ConfigSelector: React.FC<ConfigSelectorProps> = ({
           onClick={() => { setShowConfigMenu(v => !v); setShowModelMenu(false); }}
           className={`${pillClass} ${showConfigMenu ? pillActiveClass : ''}`}
         >
-          📋 <span className="max-w-[120px] truncate">{activeConfig?.name ?? '选择配置'}</span>
+          📋 <span className="max-w-[120px] truncate">{activeConfig?.name || (activeConfig ? PROVIDER_LABELS[activeConfig.provider] : '选择配置')}</span>
           {chevron}
         </button>
 
@@ -100,7 +129,7 @@ export const ConfigSelector: React.FC<ConfigSelectorProps> = ({
                 onClick={() => { onConfigChange(c.id); setShowConfigMenu(false); }}
                 className={optionClass(c.id === activeConfigId)}
               >
-                <span className="truncate">{c.name}</span>
+                <span className="truncate">{c.name || PROVIDER_LABELS[c.provider] || c.provider}</span>
                 {c.id === activeConfigId && (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="m5 13 4 4L19 7" /></svg>
                 )}

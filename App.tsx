@@ -20,12 +20,10 @@ import { loadAssetLibrary, addAsset, removeAsset, renameAsset } from './utils/as
 import { loadGenerationHistory, addGenerationHistoryItem } from './utils/generationHistory';
 import { editImage, generateImageFromText, generateVideo, setGeminiRuntimeConfig, enhancePromptWithGemini } from './services/geminiService';
 import { splitImageByBanana, runBananaImageAgent, setBananaRuntimeConfig } from './services/bananaService';
-import { enhancePromptWithProvider, generateImageWithProvider, inferProviderFromModel } from './services/aiGateway';
+import { DEFAULT_PROVIDER_MODELS, enhancePromptWithProvider, generateImageWithProvider, inferCapabilityFromModel, inferProviderFromModel, isGoogleImageEditModel, isGoogleTextToImageModel, inferCapabilitiesByProvider } from './services/aiGateway';
 import { fileToDataUrl } from './utils/fileUtils';
 import { translations } from './translations';
-import { useAPIConfigStore } from './src/store/api-config-store';
 import { saveKeysEncrypted, loadKeysDecrypted, clearAllKeyData, migrateLegacyKeys } from './utils/keyVault';
-import type { APIConfig } from './src/types/api-config';
 import { getCompactChromeMetrics } from './utils/uiScale';
 
 const generateId = () => `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -374,18 +372,22 @@ const DEFAULT_MODEL_PREFS: ModelPreference = {
 };
 
 // 根据 provider 映射出可选模型列表
-const PROVIDER_MODELS: Record<string, { text: string[]; image: string[]; video: string[] }> = {
-    google:    { text: ['gemini-2.5-pro', 'gemini-2.5-flash'], image: ['gemini-2.5-flash-image', 'imagen-4.0-generate-001'], video: ['veo-2.0-generate-001'] },
-    openai:    { text: ['gpt-4o-mini'], image: ['dall-e-3'], video: [] },
-    anthropic: { text: ['claude-3-5-sonnet'], image: [], video: [] },
-    qwen:      { text: ['qwen-max'], image: [], video: [] },
-    stability: { text: [], image: ['sdxl'], video: [] },
-    banana:    { text: [], image: [], video: [] },
+const PROVIDER_MODELS = DEFAULT_PROVIDER_MODELS;
+
+const ensureModelOption = (options: string[], model?: string) => {
+    const trimmed = model?.trim();
+    if (!trimmed) return options;
+    return options.includes(trimmed) ? options : [trimmed, ...options];
+};
+
+const addUniqueModel = (set: Set<string>, model?: string) => {
+    const trimmed = model?.trim();
+    if (trimmed) set.add(trimmed);
 };
 // 兜底：当用户没有任何 API Key 时的默认选项（不可用，仅占位）
-const FALLBACK_TEXT_OPTIONS = ['gemini-2.5-pro'];
-const FALLBACK_IMAGE_OPTIONS = ['gemini-2.5-flash-image'];
-const FALLBACK_VIDEO_OPTIONS = ['veo-2.0-generate-001'];
+const FALLBACK_TEXT_OPTIONS = ensureModelOption([...(PROVIDER_MODELS.google?.text || [])], DEFAULT_MODEL_PREFS.textModel);
+const FALLBACK_IMAGE_OPTIONS = ensureModelOption([...(PROVIDER_MODELS.google?.image || [])], DEFAULT_MODEL_PREFS.imageModel);
+const FALLBACK_VIDEO_OPTIONS = ensureModelOption([...(PROVIDER_MODELS.google?.video || [])], DEFAULT_MODEL_PREFS.videoModel);
 const BOARDS_STORAGE_KEY = 'boards.v1';
 const ACTIVE_BOARD_STORAGE_KEY = 'boards.activeId.v1';
 
@@ -403,26 +405,6 @@ const THEME_PALETTES = {
         buttonBgColor: '#f3f4f6',
     },
 } as const;
-
-const inferCapabilitiesByProvider = (provider: AIProvider): AICapability[] => {
-    switch (provider) {
-        case 'google':
-            return ['text', 'image', 'video'];
-        case 'openai':
-            return ['text', 'image'];
-        case 'anthropic':
-        case 'qwen':
-            return ['text'];
-        case 'stability':
-            return ['image'];
-        case 'banana':
-            return ['agent'];
-        case 'custom':
-            return ['text', 'image', 'video'];
-        default:
-            return ['text'];
-    }
-};
 
 const normalizeApiKeyEntry = (item: Partial<UserApiKey>): UserApiKey | null => {
     if (!item || !item.id || !item.provider || !item.key) return null;
@@ -620,8 +602,17 @@ const App: React.FC = () => {
         try { return localStorage.getItem('autoEnhance.v1') === 'true'; } catch { return false; }
     });
 
-    // ── API 配置管理 Store ──────────────────────────────────────
-    const apiConfigStore = useAPIConfigStore();
+    // ── 统一 API Key 选择器状态（替代旧的 apiConfigStore） ──────
+    const [activeUserKeyId, setActiveUserKeyId] = React.useState<string | null>(null);
+    const [activeUserModelId, setActiveUserModelId] = React.useState<string | null>(null);
+
+    const handleUserKeyChange = React.useCallback((id: string) => {
+        setActiveUserKeyId(id);
+        const key = userApiKeys.find(k => k.id === id);
+        if (key) {
+            setActiveUserModelId(key.defaultModel || key.customModels?.[0] || null);
+        }
+    }, [userApiKeys]);
 
     // 根据用户已配置的 API Key 动态计算可选模型列表
     const dynamicModelOptions = useMemo(() => {
@@ -635,13 +626,21 @@ const App: React.FC = () => {
             if (caps.includes('text'))  providerModels.text.forEach(m => textSet.add(m));
             if (caps.includes('image')) providerModels.image.forEach(m => imageSet.add(m));
             if (caps.includes('video')) providerModels.video.forEach(m => videoSet.add(m));
+
+            const userDefinedModels = [...(key.customModels || []), key.defaultModel].filter((model): model is string => !!model);
+            for (const model of userDefinedModels) {
+                const capability = inferCapabilityFromModel(model);
+                if (capability === 'text' && caps.includes('text')) addUniqueModel(textSet, model);
+                if (capability === 'image' && caps.includes('image')) addUniqueModel(imageSet, model);
+                if (capability === 'video' && caps.includes('video')) addUniqueModel(videoSet, model);
+            }
         }
         return {
-            text:  textSet.size > 0 ? Array.from(textSet) : FALLBACK_TEXT_OPTIONS,
-            image: imageSet.size > 0 ? Array.from(imageSet) : FALLBACK_IMAGE_OPTIONS,
-            video: videoSet.size > 0 ? Array.from(videoSet) : FALLBACK_VIDEO_OPTIONS,
+            text: ensureModelOption(textSet.size > 0 ? Array.from(textSet) : [...FALLBACK_TEXT_OPTIONS], modelPreference.textModel),
+            image: ensureModelOption(imageSet.size > 0 ? Array.from(imageSet) : [...FALLBACK_IMAGE_OPTIONS], modelPreference.imageModel),
+            video: ensureModelOption(videoSet.size > 0 ? Array.from(videoSet) : [...FALLBACK_VIDEO_OPTIONS], modelPreference.videoModel),
         };
-    }, [userApiKeys]);
+    }, [modelPreference.imageModel, modelPreference.textModel, modelPreference.videoModel, userApiKeys]);
 
     // 持久化 autoEnhance 开关
     useEffect(() => {
@@ -781,11 +780,11 @@ const App: React.FC = () => {
             videoApiKey: googleVideoKey?.key || googleImageKey?.key || googleTextKey?.key,
             textModel: textProvider === 'google' ? modelPreference.textModel : undefined,
             imageModel:
-                imageProvider === 'google' && modelPreference.imageModel.startsWith('gemini')
+                imageProvider === 'google' && isGoogleImageEditModel(modelPreference.imageModel)
                     ? modelPreference.imageModel
                     : undefined,
             textToImageModel:
-                imageProvider === 'google' && modelPreference.imageModel.startsWith('imagen')
+                imageProvider === 'google' && isGoogleTextToImageModel(modelPreference.imageModel)
                     ? modelPreference.imageModel
                     : undefined,
             videoModel: videoProvider === 'google' ? modelPreference.videoModel : undefined,
@@ -2190,7 +2189,7 @@ const App: React.FC = () => {
             ? inferProviderFromModel(modelPreference.videoModel)
             : inferProviderFromModel(modelPreference.imageModel);
         const hasKey = userApiKeys.some(k => {
-            const caps = k.capabilities?.length ? k.capabilities : [];
+            const caps = k.capabilities?.length ? k.capabilities : inferCapabilitiesByProvider(k.provider);
             return caps.includes(neededCapability) && k.provider === neededProvider;
         });
         if (!hasKey) {
@@ -2217,7 +2216,7 @@ const App: React.FC = () => {
         const attachmentReferenceImages = activeAttachments.map(item => ({ href: item.href, mimeType: item.mimeType }));
         const imageProvider = inferProviderFromModel(modelPreference.imageModel);
         const videoProvider = inferProviderFromModel(modelPreference.videoModel);
-        const supportsReferenceEditing = imageProvider === 'google';
+        const supportsReferenceEditing = imageProvider === 'google' && isGoogleImageEditModel(modelPreference.imageModel);
         const imageOutputName = generationMode === 'keyframe' ? 'Keyframe' : 'Generated Image';
 
         /**
@@ -3134,7 +3133,6 @@ const App: React.FC = () => {
                 modelPreference={modelPreference}
                 setModelPreference={setModelPreference}
                 t={t}
-                apiConfigStore={apiConfigStore}
                 clearKeysOnExit={clearKeysOnExit}
                 setClearKeysOnExit={setClearKeysOnExit}
             />
@@ -3627,11 +3625,11 @@ const App: React.FC = () => {
                             characterLocks={characterLocks}
                             activeCharacterLockId={activeCharacterLockId}
                             onSetActiveCharacterLock={handleSetActiveCharacterLock}
-                            apiConfigs={apiConfigStore.configs}
-                            activeApiConfigId={apiConfigStore.activeConfigId}
-                            activeApiModelId={apiConfigStore.activeModelId}
-                            onApiConfigChange={apiConfigStore.setActiveConfig}
-                            onApiModelChange={apiConfigStore.setActiveModel}
+                            apiConfigs={userApiKeys}
+                            activeApiConfigId={activeUserKeyId}
+                            activeApiModelId={activeUserModelId}
+                            onApiConfigChange={handleUserKeyChange}
+                            onApiModelChange={setActiveUserModelId}
                             userApiKeys={userApiKeys}
                             onOpenSettings={() => setIsSettingsPanelOpen(true)}
                         />

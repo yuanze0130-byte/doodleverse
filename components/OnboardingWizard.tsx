@@ -49,6 +49,11 @@ const PROVIDER_CAPABILITIES: Record<AIProvider, AICapability[]> = {
     stability: ['image'],
     qwen: ['text'],
     banana: ['agent'],
+    deepseek: ['text'],
+    siliconflow: ['text', 'image'],
+    keling: ['image', 'video'],
+    flux: ['image'],
+    midjourney: ['image'],
     custom: ['text', 'image'],
 };
 
@@ -59,6 +64,11 @@ const PROVIDER_LABELS: Record<string, string> = {
     anthropic: 'Anthropic Claude',
     stability: 'Stability AI',
     qwen: 'Qwen 通义千问',
+    deepseek: 'DeepSeek',
+    siliconflow: 'SiliconFlow',
+    keling: 'Keling 可灵',
+    flux: 'Flux',
+    midjourney: 'Midjourney',
 };
 
 export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
@@ -211,7 +221,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
                                 AI 服务商
                             </label>
                             <div className="flex flex-wrap gap-2">
-                                {(['google', 'openai', 'anthropic', 'stability', 'qwen'] as AIProvider[]).map(p => (
+                                {(['google', 'openai', 'anthropic', 'deepseek', 'siliconflow', 'qwen', 'stability', 'keling', 'flux', 'midjourney'] as AIProvider[]).map(p => (
                                     <button
                                         key={p}
                                         type="button"

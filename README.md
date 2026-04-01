@@ -175,7 +175,39 @@ MakingLovart/
 
 ## 🐳 Deployment
 
-### Docker (推荐)
+### 🖥️ Desktop App (Tauri)
+
+项目支持打包为桌面应用（Windows / macOS / Linux），基于 [Tauri](https://tauri.app/) 框架，安装包体积仅 ~3-5MB。
+
+**前提条件：**
+- Node.js 18+
+- Rust 1.80+（推荐 1.94+）
+- Windows: WebView2（Win10/11 已自带）
+
+```bash
+# 安装依赖
+npm install
+
+# 开发模式（带热更新）
+npm run tauri:dev
+
+# 生产构建（生成安装包）
+npm run tauri:build
+```
+
+构建产物位于 `src-tauri/target/release/bundle/`：
+- **Windows**: `nsis/MakingLovart_x.x.x_x64-setup.exe`（NSIS 安装程序）、`msi/MakingLovart_x.x.x_x64_en-US.msi`
+- **macOS**: `.dmg` / `.app`
+- **Linux**: `.deb` / `.AppImage`
+
+> 💡 如需自动更新签名，构建前设置环境变量：
+> ```powershell
+> $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "src-tauri/.tauri_private_key" -Raw
+> $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+> npm run tauri:build
+> ```
+
+### Docker (推荐 Web 部署)
 
 ```bash
 # 一键启动
