@@ -42,6 +42,9 @@ const providerBaseUrl: Record<AIProvider, string> = {
     keling: 'https://api.klingai.com/v1',
     flux: 'https://api.bfl.ml/v1',
     midjourney: 'https://api.midjourney.com/v1',
+    runningHub: 'https://www.runninghub.cn/openapi/v2',
+    minimax: 'https://api.minimax.chat/v1',
+    volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
     custom: '',
 };
 

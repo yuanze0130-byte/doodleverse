@@ -112,6 +112,8 @@ const PROVIDER_BASE_URLS: Partial<Record<AIProvider, string>> = {
     deepseek: 'https://api.deepseek.com/v1',
     siliconflow: 'https://api.siliconflow.cn/v1',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    minimax: 'https://api.minimax.chat/v1',
+    volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
 };
 
 // ── 主入口 ──────────────────────────────────────────
@@ -125,7 +127,7 @@ export async function fetchModelsForProvider(
     }
 
     // OpenAI 兼容类
-    if (['openai', 'deepseek', 'siliconflow', 'qwen', 'custom'].includes(provider)) {
+    if (['openai', 'deepseek', 'siliconflow', 'qwen', 'minimax', 'volcengine', 'custom'].includes(provider)) {
         const url = baseUrl || PROVIDER_BASE_URLS[provider];
         if (!url) {
             return { ok: false, models: [], error: '未指定 Base URL' };
@@ -152,9 +154,15 @@ export const FREE_KEY_LINKS: { provider: AIProvider; label: string; url: string;
         description: '注册即送 500 万 Tokens，DeepSeek-V3 和 DeepSeek-R1',
     },
     {
-        provider: 'siliconflow',
-        label: 'SiliconFlow 硅基流动',
-        url: 'https://cloud.siliconflow.cn/account/ak',
-        description: '注册即送 14 元额度，支持多种开源模型',
+        provider: 'volcengine',
+        label: '火山引擎 (豆包)',
+        url: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey',
+        description: '注册赠送免费额度，支持豆包大模型',
+    },
+    {
+        provider: 'minimax',
+        label: 'MiniMax',
+        url: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+        description: '注册即送额度，支持文本、图片和视频生成',
     },
 ];

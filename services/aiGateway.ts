@@ -65,6 +65,16 @@ export const DEFAULT_PROVIDER_MODELS: Partial<Record<AIProvider, ProviderModelMa
         image: ['rhart-image-n-pro-official'],
         video: [],
     },
+    minimax: {
+        text: ['MiniMax-Text-01', 'abab6.5s-chat'],
+        image: ['minimax-image-01'],
+        video: ['video-01'],
+    },
+    volcengine: {
+        text: ['doubao-1.5-pro-256k', 'doubao-1.5-pro-32k'],
+        image: [],
+        video: [],
+    },
 };
 
 /**
@@ -76,7 +86,7 @@ export async function validateApiKey(provider: AIProvider, apiKey: string, baseU
     }
 
     // OpenAI-compatible: 调用 /models 接口
-    if (provider === 'openai' || provider === 'qwen' || provider === 'deepseek' || provider === 'siliconflow' || provider === 'custom') {
+    if (provider === 'openai' || provider === 'qwen' || provider === 'deepseek' || provider === 'siliconflow' || provider === 'minimax' || provider === 'volcengine' || provider === 'custom') {
         try {
             const url = (baseUrl || DEFAULT_BASE_URLS[provider]).replace(/\/$/, '');
             const res = await fetch(`${url}/models`, {
@@ -157,6 +167,8 @@ const DEFAULT_BASE_URLS: Record<AIProvider, string> = {
     flux: 'https://api.bfl.ml/v1',
     midjourney: 'https://api.midjourney.com/v1',
     runningHub: 'https://www.runninghub.cn/openapi/v2',
+    minimax: 'https://api.minimax.chat/v1',
+    volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
     custom: '',
 };
 
@@ -171,6 +183,7 @@ export function inferProviderFromKey(apiKey: string): AIProvider | null {
     if (/^sk-[a-f0-9]{32,}$/i.test(trimmed)) return 'deepseek';
     if (/^sa-/i.test(trimmed)) return 'stability';
     if (/^sk-sf/i.test(trimmed)) return 'siliconflow';
+    if (/^eyJ/i.test(trimmed)) return 'minimax'; // MiniMax keys start with eyJ (JWT-like)
     if (/^[a-f0-9]{32}$/i.test(trimmed)) return 'runningHub'; // 32-char hex
     return null;
 }
@@ -203,6 +216,8 @@ export const PROVIDER_LABELS: Record<AIProvider, string> = {
     flux: 'Flux (BFL)',
     midjourney: 'Midjourney',
     runningHub: 'RunningHub',
+    minimax: 'MiniMax',
+    volcengine: '火山引擎 (豆包)',
     custom: '自定义',
 };
 
@@ -297,6 +312,8 @@ export function inferProviderFromModel(model: string): AIProvider {
     if (/^(kling|keling)/i.test(model)) return 'keling';
     if (/^flux/i.test(model)) return 'flux';
     if (/^midjourney/i.test(model)) return 'midjourney';
+    if (/^(minimax|abab|video-01)/i.test(model)) return 'minimax';
+    if (/^(doubao|skylark|ep-)/i.test(model)) return 'volcengine';
     return 'custom';
 }
 

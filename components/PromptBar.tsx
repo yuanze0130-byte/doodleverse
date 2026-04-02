@@ -491,7 +491,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                                 </button>
                                 {expandedPanel === 'more' && (
                                     <div className={`${popoverCardClass} left-auto right-0 w-[320px]`}>
-                                        <PopoverHeader title="更多操作" subtitle="把次级能力收进来，底部按钮保持简洁" />
+                                        <PopoverHeader title="更多操作" subtitle="参考图、角色锁定、效果存储" />
                                         <div className="space-y-1">
                                             <MenuOptionButton
                                                 label="上传参考图"
