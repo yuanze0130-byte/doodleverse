@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "ext:build": "node extension/build.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.17.0",
@@ -28,12 +29,14 @@
     "tippy.js": "^6.3.7"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/cli": "^2.10.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "jsdom": "^27.0.1",
+    "tailwindcss": "^4.2.2",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "vitest": "^4.1.0"

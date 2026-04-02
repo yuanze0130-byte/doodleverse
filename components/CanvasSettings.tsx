@@ -809,6 +809,18 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                                 </div>
                             )}
 
+                            {/* ComfyUI 本地模型 — Coming Soon */}
+                            {!editingKeyId && (
+                                <div className={`flex items-center gap-3 rounded-2xl border border-dashed p-3 ${isDark ? 'border-[#2A3140] bg-[#161A22]' : 'border-[#E4E7EC] bg-[#F8FAFC]'}`}>
+                                    <span className="text-lg">🖥️</span>
+                                    <div className="flex-1 min-w-0">
+                                        <div className={`text-xs font-semibold ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>ComfyUI 本地模型</div>
+                                        <div className={`text-[10px] mt-0.5 ${isDark ? 'text-[#667085]' : 'text-[#98A2B3]'}`}>连接本地 ComfyUI 服务，运行 Wan2.1 等视频模型</div>
+                                    </div>
+                                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-medium ${isDark ? 'bg-purple-900/30 text-purple-400' : 'bg-purple-50 text-purple-600'}`}>Coming Soon</span>
+                                </div>
+                            )}
+
                             <div className="grid gap-3 md:grid-cols-2">
                                 <select value={provider} onChange={(event) => handleProviderChange(event.target.value as AIProvider)} className={inputClass}>
                                     {Object.entries(PROVIDER_LABELS).map(([key, label]) => (

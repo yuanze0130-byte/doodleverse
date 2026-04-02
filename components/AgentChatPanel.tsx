@@ -214,6 +214,20 @@ export const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
                             </div>
                         );
                     })}
+                    {/* Skills / 自定义 Agent — Coming Soon */}
+                    <div className={`flex items-center gap-2 rounded-xl border border-dashed px-3 py-2 ${
+                        isDark ? 'border-gray-600 bg-gray-800/30' : 'border-gray-300 bg-gray-50/50'
+                    }`}>
+                        <span className="text-sm">🧩</span>
+                        <div className="flex-1 min-w-0">
+                            <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>自定义 Skills</span>
+                            <p className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>创建你自己的 Agent / GPTs</p>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            isDark ? 'bg-indigo-900/40 text-indigo-400' : 'bg-indigo-50 text-indigo-500'
+                        }`}>Coming Soon</span>
+                    </div>
+
                     <div className={`flex items-center gap-2 pt-2 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
                         <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>预算 $</span>
                         <input

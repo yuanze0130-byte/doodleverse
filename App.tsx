@@ -771,6 +771,13 @@ const App: React.FC = () => {
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, [clearKeysOnExit]);
 
+    // Chrome Extension bridge: sync API keys to chrome.storage for content script access
+    useEffect(() => {
+        if (!apiKeysLoaded || typeof chrome === 'undefined' || !chrome?.storage?.local) return;
+        const safeKeys = userApiKeys.map(k => ({ provider: k.provider, key: k.key, baseUrl: k.baseUrl, models: k.models, capabilities: k.capabilities }));
+        chrome.storage.local.set({ flovart_user_api_keys: safeKeys });
+    }, [userApiKeys, apiKeysLoaded]);
+
     useEffect(() => {
         localStorage.setItem('modelPreference.v1', JSON.stringify(modelPreference));
     }, [modelPreference]);
@@ -1337,6 +1344,47 @@ const App: React.FC = () => {
             console.error(err);
         }
     }, [getCanvasPoint, activeBoardId, setElements]);
+
+    // Chrome Extension bridge: pick up pending images/prompts sent from context menu or popup
+    useEffect(() => {
+        if (typeof chrome === 'undefined' || !chrome?.storage?.local) return;
+        chrome.storage.local.get(['flovart_pending_image', 'flovart_pending_prompt', 'flovart_collected_images'], (result) => {
+            // Pending single image → add to canvas
+            if (result.flovart_pending_image) {
+                const { dataUrl, name } = result.flovart_pending_image;
+                if (dataUrl) {
+                    const img = new Image();
+                    img.onload = () => {
+                        const newImage: ImageElement = {
+                            id: generateId(),
+                            type: 'image',
+                            name: name || 'Extension Image',
+                            x: 100,
+                            y: 100,
+                            width: Math.min(img.width, 800),
+                            height: Math.min(img.height, 600),
+                            href: dataUrl,
+                            mimeType: 'image/png',
+                        };
+                        setElements(prev => [...prev, newImage]);
+                        setSelectedElementIds([newImage.id]);
+                    };
+                    img.src = dataUrl;
+                }
+                chrome.storage.local.remove('flovart_pending_image');
+            }
+            // Pending prompt → fill prompt bar
+            if (result.flovart_pending_prompt) {
+                const { prompt: pendingPrompt } = result.flovart_pending_prompt;
+                if (pendingPrompt) setPrompt(pendingPrompt);
+                chrome.storage.local.remove('flovart_pending_prompt');
+            }
+            // Collected images are available for the inspiration panel — stored for future use
+            if (result.flovart_collected_images) {
+                chrome.storage.local.remove('flovart_collected_images');
+            }
+        });
+    }, []);
 
      const getSelectableElement = (elementId: string, allElements: Element[]): Element | null => {
         const element = allElements.find(el => el.id === elementId);
