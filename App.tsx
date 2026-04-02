@@ -23,7 +23,7 @@ import { loadAssetLibrary, addAsset, removeAsset, renameAsset } from './utils/as
 import { loadGenerationHistory, addGenerationHistoryItem } from './utils/generationHistory';
 import { editImage, generateImageFromText, generateVideo, setGeminiRuntimeConfig, enhancePromptWithGemini } from './services/geminiService';
 import { splitImageByBanana, runBananaImageAgent, setBananaRuntimeConfig } from './services/bananaService';
-import { DEFAULT_PROVIDER_MODELS, enhancePromptWithProvider, generateImageWithProvider, inferCapabilityFromModel, inferProviderFromModel, isGoogleImageEditModel, isGoogleTextToImageModel, inferCapabilitiesByProvider } from './services/aiGateway';
+import { DEFAULT_PROVIDER_MODELS, enhancePromptWithProvider, generateImageWithProvider, inferCapabilityFromModel, inferProviderFromModel, isGoogleImageEditModel, isGoogleTextToImageModel, inferCapabilitiesByProvider, PROVIDER_LABELS } from './services/aiGateway';
 import { fileToDataUrl } from './utils/fileUtils';
 import { translations } from './translations';
 import { saveKeysEncrypted, loadKeysDecrypted, clearAllKeyData, migrateLegacyKeys } from './utils/keyVault';
@@ -2494,7 +2494,9 @@ const App: React.FC = () => {
             return caps.includes(neededCapability) && k.provider === neededProvider;
         });
         if (!hasKey) {
-            setError(`未找到可用于「${neededCapability === 'video' ? '视频' : '图片'}生成」的 ${neededProvider} API Key。请先到设置 → API 配置中添加。`);
+            const providerLabel = PROVIDER_LABELS[neededProvider] || neededProvider;
+            const capLabel = neededCapability === 'video' ? '视频' : '图片';
+            setError(`未配置 ${providerLabel} 的 API Key（${capLabel}生成需要）。点击右上角 ⚙️ 设置添加，或切换到已配置 Key 的模型。`);
             setIsSettingsPanelOpen(true);
             return;
         }
@@ -3633,6 +3635,7 @@ const App: React.FC = () => {
                 clearKeysOnExit={clearKeysOnExit}
                 setClearKeysOnExit={setClearKeysOnExit}
                 usageSummary={usageSummaryMap}
+                dynamicModelOptions={dynamicModelOptions}
             />
             {/* ============ 图层蒙版编辑浮动面板 ============ */}
 

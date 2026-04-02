@@ -2,6 +2,7 @@ import React from 'react';
 import type { WheelAction, UserApiKey, ModelPreference, AIProvider, AICapability, ThemeMode, ModelItem } from '../types';
 import { DEFAULT_PROVIDER_MODELS, validateApiKey, inferProviderFromKey, inferCapabilitiesByProvider, PROVIDER_LABELS } from '../services/aiGateway';
 import { formatCost, type KeyUsageSummary } from '../utils/usageMonitor';
+import { fetchModelsForProvider, FREE_KEY_LINKS, type FetchedModel } from '../services/modelFetcher';
 
 interface CanvasSettingsProps {
     isOpen: boolean;
@@ -25,6 +26,8 @@ interface CanvasSettingsProps {
     setClearKeysOnExit: (v: boolean) => void;
     /** Per-key usage summary (optional) */
     usageSummary?: Map<string, KeyUsageSummary>;
+    /** 动态模型选项（从 App.tsx 传入，基于用户 Key 计算） */
+    dynamicModelOptions?: { text: string[]; image: string[]; video: string[] };
 }
 
 const providerBaseUrl: Record<AIProvider, string> = {
@@ -75,6 +78,7 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     clearKeysOnExit,
     setClearKeysOnExit,
     usageSummary,
+    dynamicModelOptions,
 }) => {
     const [provider, setProvider] = React.useState<AIProvider>('google');
     const [apiKey, setApiKey] = React.useState('');
@@ -96,22 +100,38 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
     // 批量测试状态
     const [batchTestResults, setBatchTestResults] = React.useState<Record<string, { ok: boolean; message?: string }>>({});
     const [isBatchTesting, setIsBatchTesting] = React.useState(false);
+    // 联网拉取模型
+    const [fetchedModels, setFetchedModels] = React.useState<FetchedModel[]>([]);
+    const [isFetchingModels, setIsFetchingModels] = React.useState(false);
+    const [fetchError, setFetchError] = React.useState<string | null>(null);
+    const [autoDetectedProvider, setAutoDetectedProvider] = React.useState<AIProvider | null>(null);
 
     const modelOptions = React.useMemo(() => ({
-        text: ensureModelOption([
-            ...(DEFAULT_PROVIDER_MODELS.google?.text || []),
-            ...(DEFAULT_PROVIDER_MODELS.openai?.text || []),
-            ...(DEFAULT_PROVIDER_MODELS.anthropic?.text || []),
-            ...(DEFAULT_PROVIDER_MODELS.qwen?.text || []),
-        ], modelPreference.textModel),
-        image: ensureModelOption([
-            ...(DEFAULT_PROVIDER_MODELS.google?.image || []),
-            ...(DEFAULT_PROVIDER_MODELS.openai?.image || []),
-            ...(DEFAULT_PROVIDER_MODELS.stability?.image || []),
-        ], modelPreference.imageModel),
-        video: ensureModelOption([...(DEFAULT_PROVIDER_MODELS.google?.video || [])], modelPreference.videoModel),
+        text: ensureModelOption(
+            dynamicModelOptions?.text?.length ? dynamicModelOptions.text : [
+                ...(DEFAULT_PROVIDER_MODELS.google?.text || []),
+                ...(DEFAULT_PROVIDER_MODELS.openai?.text || []),
+                ...(DEFAULT_PROVIDER_MODELS.anthropic?.text || []),
+                ...(DEFAULT_PROVIDER_MODELS.qwen?.text || []),
+            ],
+            modelPreference.textModel
+        ),
+        image: ensureModelOption(
+            dynamicModelOptions?.image?.length ? dynamicModelOptions.image : [
+                ...(DEFAULT_PROVIDER_MODELS.google?.image || []),
+                ...(DEFAULT_PROVIDER_MODELS.openai?.image || []),
+                ...(DEFAULT_PROVIDER_MODELS.stability?.image || []),
+            ],
+            modelPreference.imageModel
+        ),
+        video: ensureModelOption(
+            dynamicModelOptions?.video?.length ? dynamicModelOptions.video : [
+                ...(DEFAULT_PROVIDER_MODELS.google?.video || []),
+            ],
+            modelPreference.videoModel
+        ),
         agent: ensureModelOption([...(DEFAULT_PROVIDER_MODELS.banana?.agent || [])], modelPreference.agentModel),
-    }), [modelPreference.agentModel, modelPreference.imageModel, modelPreference.textModel, modelPreference.videoModel]);
+    }), [dynamicModelOptions, modelPreference.agentModel, modelPreference.imageModel, modelPreference.textModel, modelPreference.videoModel]);
 
     if (!isOpen) return null;
 
@@ -235,16 +255,51 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
         setNewModelId('');
         setExtraConfig({});
         setValidationResult(null);
+        setFetchedModels([]);
+        setFetchError(null);
+        setAutoDetectedProvider(null);
         setShowKeyModal(false);
     };
 
-    /** API Key 粘贴自动检测 Provider */
+    /** 联网拉取当前 Provider 可用的模型列表 */
+    const handleFetchModels = async (targetProvider: AIProvider, targetKey: string, targetBaseUrl?: string) => {
+        if (!targetKey.trim()) return;
+        setIsFetchingModels(true);
+        setFetchError(null);
+        try {
+            const result = await fetchModelsForProvider(targetProvider, targetKey.trim(), targetBaseUrl?.trim() || undefined);
+            if (result.ok && result.models.length > 0) {
+                setFetchedModels(result.models);
+                // 自动填充到编辑模型列表
+                const modelItems: ModelItem[] = result.models.map(m => ({ id: m.id, name: m.name || m.id }));
+                setEditModels(modelItems);
+                if (modelItems.length > 0) setEditDefaultModel(modelItems[0].id);
+                // 自动推断 capabilities
+                const caps = new Set<AICapability>();
+                for (const m of result.models) caps.add(m.capability);
+                if (caps.size > 0) setCapabilities(Array.from(caps));
+            } else if (!result.ok) {
+                setFetchError(result.error || '拉取失败');
+            }
+        } catch {
+            setFetchError('网络错误');
+        }
+        setIsFetchingModels(false);
+    };
+
+    /** API Key 粘贴自动检测 Provider + 拉取模型 */
     const handleKeyPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
         const pasted = e.clipboardData.getData('text');
         if (pasted) {
             const detected = inferProviderFromKey(pasted);
-            if (detected && detected !== provider) {
-                handleProviderChange(detected);
+            if (detected) {
+                setAutoDetectedProvider(detected);
+                if (detected !== provider) {
+                    handleProviderChange(detected);
+                }
+                // 自动拉取模型
+                const targetBaseUrl = detected !== provider ? providerBaseUrl[detected] : baseUrl;
+                handleFetchModels(detected, pasted, targetBaseUrl);
             }
         }
     };
@@ -725,6 +780,32 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                         </div>
 
                         <div className="space-y-3">
+                            {/* 免费获取 API Key 引导 */}
+                            {!editingKeyId && (
+                                <div className={`rounded-2xl border p-3 ${isDark ? 'border-[#2A3140] bg-[#161A22]' : 'border-[#E4E7EC] bg-[#F8FAFC]'}`}>
+                                    <div className={`mb-2 text-xs font-semibold ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>🆓 免费获取 API Key</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {FREE_KEY_LINKS.map(link => (
+                                            <a
+                                                key={link.provider}
+                                                href={link.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium transition ${
+                                                    isDark
+                                                        ? 'border-[#2A3140] text-[#7CB4FF] hover:bg-[#1B2330]'
+                                                        : 'border-[#B2CCFF] text-[#175CD3] hover:bg-[#EEF4FF]'
+                                                }`}
+                                                title={link.description}
+                                            >
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                                {link.label}
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="grid gap-3 md:grid-cols-2">
                                 <select value={provider} onChange={(event) => handleProviderChange(event.target.value as AIProvider)} className={inputClass}>
                                     {Object.entries(PROVIDER_LABELS).map(([key, label]) => (
@@ -740,7 +821,7 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                                     onChange={(event) => setApiKey(event.target.value)}
                                     onPaste={handleKeyPaste}
                                     type={showKey ? 'text' : 'password'}
-                                    placeholder="粘贴 API Key（自动识别 Provider）"
+                                    placeholder="粘贴 API Key（自动识别 Provider 并拉取模型）"
                                     className={inputClass}
                                     autoFocus
                                 />
@@ -749,10 +830,23 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
                                 </button>
                             </div>
 
+                            {/* 自动识别结果提示 */}
+                            {autoDetectedProvider && (
+                                <div className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs ${
+                                    isDark ? 'bg-[#1B2330] text-[#7CB4FF]' : 'bg-[#EFF6FF] text-[#1D4ED8]'
+                                }`}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                    自动识别为 <strong>{PROVIDER_LABELS[autoDetectedProvider]}</strong>
+                                    {isFetchingModels && <span className="ml-1 animate-pulse">正在拉取模型列表...</span>}
+                                </div>
+                            )}
+
                             <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="Base URL（可选）" className={inputClass} />
 
                             <div>
-                                <div className={`mb-2 text-sm font-medium ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>这个 API 用于</div>
+                                <div className={`mb-2 flex items-center justify-between`}>
+                                    <span className={`text-sm font-medium ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>这个 API 用于</span>
+                                </div>
                                 <div className="flex flex-wrap gap-2">
                                     {(['text', 'image', 'video', 'agent'] as AICapability[]).map(capability => (
                                         <button
@@ -775,7 +869,24 @@ export const CanvasSettings: React.FC<CanvasSettingsProps> = ({
 
                             {/* 模型管理 */}
                             <div>
-                                <div className={`mb-2 text-sm font-medium ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>模型列表</div>
+                                <div className={`mb-2 flex items-center justify-between`}>
+                                    <span className={`text-sm font-medium ${isDark ? 'text-[#D0D5DD]' : 'text-[#344054]'}`}>模型列表</span>
+                                    <button
+                                        type="button"
+                                        disabled={!apiKey.trim() || isFetchingModels}
+                                        onClick={() => handleFetchModels(provider, apiKey, baseUrl)}
+                                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition disabled:opacity-40 ${
+                                            isDark ? 'border-[#4B5B78] text-[#7CB4FF] hover:bg-[#1B2330]' : 'border-[#B2CCFF] text-[#175CD3] hover:bg-[#EEF4FF]'
+                                        }`}
+                                    >
+                                        {isFetchingModels ? '拉取中...' : '🔄 获取模型'}
+                                    </button>
+                                </div>
+                                {fetchError && (
+                                    <div className={`mb-2 rounded-xl px-3 py-1.5 text-xs ${isDark ? 'bg-[#3A1616] text-[#FDA29B]' : 'bg-[#FEF3F2] text-[#B42318]'}`}>
+                                        拉取模型失败：{fetchError}（可手动添加模型）
+                                    </div>
+                                )}
                                 {editModels.length > 0 && (
                                     <div className="mb-2 flex flex-wrap gap-1.5">
                                         {editModels.map(m => (
