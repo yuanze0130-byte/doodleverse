@@ -316,6 +316,9 @@ const App: React.FC = () => {
             textApiKey: googleTextKey?.key,
             imageApiKey: googleImageKey?.key || googleTextKey?.key,
             videoApiKey: googleVideoKey?.key || googleImageKey?.key || googleTextKey?.key,
+            textBaseUrl: googleTextKey?.baseUrl || googleImageKey?.baseUrl,
+            imageBaseUrl: googleImageKey?.baseUrl || googleTextKey?.baseUrl,
+            videoBaseUrl: googleVideoKey?.baseUrl || googleImageKey?.baseUrl || googleTextKey?.baseUrl,
             textModel: textProvider === 'google' ? modelPreference.textModel : undefined,
             imageModel:
                 imageProvider === 'google' && isGoogleImageEditModel(modelPreference.imageModel)
