@@ -371,8 +371,7 @@ export async function generateImageFromText(
   newImageMimeType: string | null;
   textResponse: string | null;
 }> {
-  const model = runtimeConfig.textToImageModel || "imagen-4.0-generate-001";
-
+  const model = runtimeConfig.textToImageModel || runtimeConfig.imageModel || "gemini-3.1-flash-image-preview";
   try {
     const data = (await geminiPost(
       `/v1beta/models/${model}:predict`,  // Imagen 用 :predict 端点
