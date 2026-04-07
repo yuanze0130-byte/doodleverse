@@ -218,7 +218,7 @@ export function useApiKeys(isSettingsPanelOpen: boolean) {
         return matches.find(key => key.isDefault) || matches[0];
     }, [userApiKeys]);
 
-    // Sync runtime config for Gemini / Banana services
+    // ✅ 修复：Sync runtime config，新增 textBaseUrl / imageBaseUrl / videoBaseUrl，支持中转站
     useEffect(() => {
         const textProvider = inferProviderFromModel(modelPreference.textModel);
         const imageProvider = inferProviderFromModel(modelPreference.imageModel);
@@ -233,6 +233,10 @@ export function useApiKeys(isSettingsPanelOpen: boolean) {
             textApiKey: googleTextKey?.key,
             imageApiKey: googleImageKey?.key || googleTextKey?.key,
             videoApiKey: googleVideoKey?.key || googleImageKey?.key || googleTextKey?.key,
+            // ✅ 新增：把用户填写的中转站 baseUrl 注入进去
+            textBaseUrl: googleTextKey?.baseUrl || googleImageKey?.baseUrl,
+            imageBaseUrl: googleImageKey?.baseUrl || googleTextKey?.baseUrl,
+            videoBaseUrl: googleVideoKey?.baseUrl || googleImageKey?.baseUrl || googleTextKey?.baseUrl,
             textModel: textProvider === 'google' ? modelPreference.textModel : undefined,
             imageModel:
                 imageProvider === 'google' && isGoogleImageEditModel(modelPreference.imageModel)
