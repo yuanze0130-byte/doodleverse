@@ -152,7 +152,7 @@ export async function validateApiKey(provider: AIProvider, apiKey: string, baseU
 const DEFAULT_BASE_URLS: Record<AIProvider, string> = {
     openai: 'https://api.openai.com/v1',
     anthropic: 'https://api.anthropic.com/v1',
-    google: 'https://generativelanguage.googleapis.com/v1beta/models',
+    google: 'https://generativelanguage.googleapis.com',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     banana: 'https://api.banana.dev/v1/vision',
     deepseek: 'https://api.deepseek.com/v1',
@@ -175,10 +175,9 @@ export function inferProviderFromKey(apiKey: string): AIProvider | null {
     if (/^sk-ant-/i.test(trimmed)) return 'anthropic';
     if (/^sk-proj-/i.test(trimmed) || /^sk-[a-zA-Z0-9]{20,}$/.test(trimmed)) return 'openai';
     if (/^sk-[a-f0-9]{32,}$/i.test(trimmed)) return 'deepseek';
-    // Stability AI removed — sa- prefix keys no longer auto-detected
     if (/^sk-sf/i.test(trimmed)) return 'siliconflow';
-    if (/^eyJ/i.test(trimmed)) return 'minimax'; // MiniMax keys start with eyJ (JWT-like)
-    if (/^[a-f0-9]{32}$/i.test(trimmed)) return 'runningHub'; // 32-char hex
+    if (/^eyJ/i.test(trimmed)) return 'minimax';
+    if (/^[a-f0-9]{32}$/i.test(trimmed)) return 'runningHub';
     return null;
 }
 
@@ -379,13 +378,7 @@ async function enhancePromptWithAnthropic(
 
 /**
  * 【函数】统一的提示词润色入口
- *
- * 根据模型名称自动推断 provider，路由到对应的润色实现。
- * 所有 provider 都通过 key 参数即时传入 API Key，避免依赖全局状态。
- *
- * @param request  - 润色请求（原始提示词 + 模式）
- * @param model    - 模型名称（用于推断 provider）
- * @param key      - 用户配置的 API Key（可选，从 App.tsx state 传入）
+ * ✅ 修复：同时传递 key?.key 和 key?.baseUrl，支持中转站
  */
 export async function enhancePromptWithProvider(
     request: PromptEnhanceRequest,
@@ -395,8 +388,7 @@ export async function enhancePromptWithProvider(
     const provider = inferProviderFromModel(model);
 
     if (provider === 'google') {
-        // 传入 key?.key 确保使用用户配置的 API Key，而非仅依赖全局 runtimeConfig
-        return enhancePromptWithGemini(request, key?.key);
+        return enhancePromptWithGemini(request, key?.key, key?.baseUrl);
     }
 
     if (provider === 'anthropic') {
@@ -408,13 +400,7 @@ export async function enhancePromptWithProvider(
 
 /**
  * 【函数】统一的图片生成入口
- *
- * 根据模型名称路由到 Google Imagen / OpenAI DALL-E 等。
- * 当前支持：google、openai、custom。
- *
- * @param prompt - 图片描述提示词
- * @param model  - 模型名称
- * @param key    - 用户 API Key
+ * ✅ 修复：同时传递 key?.key 和 key?.baseUrl，支持中转站
  */
 export async function generateImageWithProvider(
     prompt: string,
@@ -424,8 +410,7 @@ export async function generateImageWithProvider(
     const provider = inferProviderFromModel(model);
 
     if (provider === 'google') {
-        // 传入 key?.key 确保使用用户 UI 中配置的 API Key
-        return generateImageFromText(prompt, key?.key);
+        return generateImageFromText(prompt, key?.key, key?.baseUrl);
     }
 
     if (provider === 'openai' || provider === 'custom') {
@@ -463,9 +448,6 @@ export async function generateImageWithProvider(
 
 /**
  * 自省诊断 — 根据用户已配置的 API Key 集合，检查各能力覆盖情况并返回警告
- *
- * @param keys - 用户当前所有 API Key（来自 App.tsx state: userApiKeys）
- * @returns covered: 已覆盖能力列表，missing: 缺失的能力，warnings: 具体提示信息
  */
 export function diagnoseKeyCapabilities(keys: UserApiKey[]): {
     covered: AICapability[];
@@ -489,7 +471,6 @@ export function diagnoseKeyCapabilities(keys: UserApiKey[]): {
     if (missing.includes('video')) warnings.push('未配置视频模型 API Key — AI 视频生成功能不可用');
     if (missing.includes('agent')) warnings.push('未配置 Agent API Key — 智能代理功能不可用');
 
-    // 检查是否有 Google key (核心能力依赖)
     const hasGoogle = keys.some(k => k.provider === 'google' && k.key);
     if (!hasGoogle && keys.length > 0) {
         warnings.push('建议配置 Google API Key — Gemini 3 / Imagen 4 / Veo 3.1 是当前最强图像和视频模型');
