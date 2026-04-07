@@ -76,6 +76,17 @@ export function useGeneration(params: UseGenerationParams) {
         images: { href: string; mimeType: string; width: number; height: number }[];
     } | null>(null);
 
+    /* ------------------------------------------------------------------ */
+    /*  ✅ 修复：hasKey 只检查 capability，不强制匹配 provider            */
+    /*  这样中转站（openai/custom provider）也能通过验证                   */
+    /* ------------------------------------------------------------------ */
+    const checkHasKey = useCallback((capability: AICapability): boolean => {
+        return userApiKeys.some(k => {
+            const caps = k.capabilities?.length ? k.capabilities : inferCapabilitiesByProvider(k.provider);
+            return caps.includes(capability);
+        });
+    }, [userApiKeys]);
+
     /* ---- helpers ---- */
 
     const handleEnhancePrompt = useCallback(async (payload: {
@@ -87,7 +98,9 @@ export function useGeneration(params: UseGenerationParams) {
         try {
             const provider = inferProviderFromModel(modelPreference.textModel);
             const key = getPreferredApiKey('text', provider);
-            return await enhancePromptWithProvider(payload, modelPreference.textModel, key);
+            // ✅ 修复：如果按 provider 找不到，退回到只按 capability 找
+            const resolvedKey = key ?? getPreferredApiKey('text');
+            return await enhancePromptWithProvider(payload, modelPreference.textModel, resolvedKey);
         } finally {
             setIsEnhancingPrompt(false);
         }
@@ -259,7 +272,7 @@ export function useGeneration(params: UseGenerationParams) {
         try {
             setIsLoading(true);
             setError(null);
-            setProgressMessage('BANANA Agent 正在放大图片...');
+            setProgressMessage('BANANA Agent ...');
             const result = await runBananaImageAgent(
                 { href: element.href, mimeType: element.mimeType },
                 'upscale',
@@ -280,7 +293,7 @@ export function useGeneration(params: UseGenerationParams) {
         try {
             setIsLoading(true);
             setError(null);
-            setProgressMessage('BANANA Agent 正在移除背景...');
+            setProgressMessage('BANANA Agent ...');
             const result = await runBananaImageAgent(
                 { href: element.href, mimeType: element.mimeType },
                 'remove-background',
@@ -301,7 +314,7 @@ export function useGeneration(params: UseGenerationParams) {
     const handleOutpaint = async (element: ImageElement, direction: 'all' | 'left' | 'right' | 'up' | 'down', expandRatio = 0.3) => {
         setIsLoading(true);
         setError(null);
-        setProgressMessage(`正在 AI 扩图 (${direction})...`);
+        setProgressMessage(` AI  (${direction})...`);
 
         try {
             const img = new Image();
@@ -340,7 +353,7 @@ export function useGeneration(params: UseGenerationParams) {
             mctx.fillRect(padL, padT, ow, oh);
             const maskDataUrl = maskCanvas.toDataURL('image/png');
 
-            setProgressMessage('AI 正在补全画面...');
+            setProgressMessage('AI ...');
 
             const result = await editImage(
                 [{ href: expandedDataUrl, mimeType: 'image/png' }],
@@ -374,13 +387,13 @@ export function useGeneration(params: UseGenerationParams) {
                     prompt: `Outpaint ${direction}`,
                 });
 
-                setProgressMessage('扩图完成！');
+                setProgressMessage('');
             } else {
-                setError('AI 扩图未返回结果，请重试。');
+                setError('AI ');
             }
         } catch (err) {
             const error = err as Error;
-            setError(`AI 扩图失败: ${error.message}`);
+            setError(`AI : ${error.message}`);
         } finally {
             setIsLoading(false);
             setTimeout(() => setProgressMessage(''), 1500);
@@ -411,13 +424,13 @@ export function useGeneration(params: UseGenerationParams) {
         mentionOrder.forEach(({ element }, idx) => {
             const escapedName = (element.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const regex = new RegExp(`@${escapedName}\\b`, 'gi');
-            processedPrompt = processedPrompt.replace(regex, `[参考图${idx + 1}]`);
+            processedPrompt = processedPrompt.replace(regex, `[${idx + 1}]`);
             orderedImages.push({ href: element.href, mimeType: element.mimeType });
         });
 
         if (orderedImages.length > 1) {
-            const mapping = orderedImages.map((_, i) => `[参考图${i + 1}]`).join('、');
-            processedPrompt = `以下提示词中包含 ${mapping} 分别对应按顺序传入的参考图片。\n${processedPrompt}`;
+            const mapping = orderedImages.map((_, i) => `[${i + 1}]`).join('');
+            processedPrompt = ` ${mapping} \n${processedPrompt}`;
         }
 
         return { prompt: processedPrompt, orderedMentionImages: orderedImages };
@@ -430,20 +443,16 @@ export function useGeneration(params: UseGenerationParams) {
         const targetImage = elements.find(el => el.id === inpaintState.targetImageId) as ImageElement | undefined;
         if (!targetImage) { setInpaintState(null); return; }
 
-        const imageProvider = inferProviderFromModel(modelPreference.imageModel);
-        const hasKey = userApiKeys.some(k => {
-            const caps = k.capabilities?.length ? k.capabilities : inferCapabilitiesByProvider(k.provider);
-            return caps.includes('image') && k.provider === imageProvider;
-        });
-        if (!hasKey) {
-            setError('未找到可用于图片编辑的 API Key，请先在设置中配置。');
+        // ✅ 修复：只检查 capability，不检查 provider
+        if (!checkHasKey('image')) {
+            setError('未配置图片生成 API Key，请在设置中添加。');
             setIsSettingsPanelOpen(true);
             return;
         }
 
         setIsLoading(true);
         setError(null);
-        setProgressMessage('正在生成 AI 局部重绘 mask...');
+        setProgressMessage(' AI  mask...');
 
         try {
             const { width, height, x: imgX, y: imgY } = targetImage;
@@ -467,7 +476,7 @@ export function useGeneration(params: UseGenerationParams) {
 
             const maskDataUrl = maskCanvas.toDataURL('image/png');
 
-            setProgressMessage('正在 AI 局部重绘...');
+            setProgressMessage(' AI ...');
 
             const result = await editImage(
                 [{ href: targetImage.href, mimeType: targetImage.mimeType }],
@@ -492,13 +501,13 @@ export function useGeneration(params: UseGenerationParams) {
                     prompt: inpaintPrompt.trim(),
                 });
 
-                setProgressMessage('局部重绘完成！');
+                setProgressMessage('');
             } else {
-                setError('AI 局部重绘未返回结果，请重试。');
+                setError('AI ');
             }
         } catch (err) {
             const error = err as Error;
-            setError(`局部重绘失败: ${error.message}`);
+            setError(`: ${error.message}`);
         } finally {
             setIsLoading(false);
             setInpaintState(null);
@@ -512,19 +521,19 @@ export function useGeneration(params: UseGenerationParams) {
     const handleGenerate = async (promptOverride?: string, source: 'prompt' | 'right' | 'agent' = 'prompt') => {
         let rawPrompt = (promptOverride ?? prompt).trim();
         if (!rawPrompt) {
-            setError('请输入提示词。');
+            setError('');
             return;
         }
 
         if (isAutoEnhanceEnabled && !promptOverride) {
             try {
-                setProgressMessage('正在 LLM 润色提示词...');
+                setProgressMessage(' LLM ...');
                 const enhanced = await handleEnhancePrompt({ prompt: rawPrompt, mode: 'smart' });
                 if (enhanced?.enhancedPrompt?.trim()) {
                     rawPrompt = enhanced.enhancedPrompt.trim();
                 }
             } catch (e) {
-                console.warn('[Auto-Enhance] 润色失败，使用原始提示词:', e);
+                console.warn('[Auto-Enhance] :', e);
             }
         }
 
@@ -532,21 +541,18 @@ export function useGeneration(params: UseGenerationParams) {
         const neededProvider = neededCapability === 'video'
             ? inferProviderFromModel(modelPreference.videoModel)
             : inferProviderFromModel(modelPreference.imageModel);
-        const hasKey = userApiKeys.some(k => {
-            const caps = k.capabilities?.length ? k.capabilities : inferCapabilitiesByProvider(k.provider);
-            return caps.includes(neededCapability) && k.provider === neededProvider;
-        });
-        if (!hasKey) {
-            const providerLabel = PROVIDER_LABELS[neededProvider] || neededProvider;
-            const capLabel = neededCapability === 'video' ? '视频' : '图片';
-            setError(`未配置 ${providerLabel} 的 API Key（${capLabel}生成需要）。点击右上角 ⚙️ 设置添加，或切换到已配置 Key 的模型。`);
+
+        // ✅ 修复：只检查 capability，不强制匹配 provider，中转站也能通过
+        if (!checkHasKey(neededCapability)) {
+            const capLabel = neededCapability === 'video' ? '视频生成' : '图片生成';
+            setError(`未配置${capLabel} API Key。请点击右上角 ⚙️ 设置添加。`);
             setIsSettingsPanelOpen(true);
             return;
         }
 
         setIsLoading(true);
         setError(null);
-        setProgressMessage('正在准备生成...');
+        setProgressMessage('...');
 
         const getMimeFromDataUrl = (href: string) => {
             const match = href.match(/^data:([^;]+);base64,/i);
@@ -568,7 +574,7 @@ export function useGeneration(params: UseGenerationParams) {
         if (generationMode === 'keyframe') {
             try {
                 if (videoProvider !== 'google') {
-                    throw new Error('首尾帧动画目前仅支持 Google Veo 模型，请先配置 Google 视频 API Key。');
+                    throw new Error(' Google Veo  Google  API Key');
                 }
 
                 const mentionedImages = mentionedElementIds
@@ -579,7 +585,7 @@ export function useGeneration(params: UseGenerationParams) {
                 const allFrameRefs = [...selectedImages, ...mentionedImages];
 
                 if (allFrameRefs.length < 1) {
-                    setError('首尾帧模式至少需要 1 张参考图（选中或 @引用画布图片）作为起始帧。');
+                    setError(' 1  @');
                     setIsLoading(false);
                     return;
                 }
@@ -589,7 +595,7 @@ export function useGeneration(params: UseGenerationParams) {
                     ? `Animate a smooth cinematic transition from the first frame to the second frame. ${effectivePrompt}`
                     : `Animate this image with smooth motion. ${effectivePrompt}`;
 
-                setProgressMessage('正在生成首尾帧过渡动画...');
+                setProgressMessage('...');
                 const { videoBlob, mimeType } = await generateVideo(
                     keyframePrompt,
                     videoAspectRatio,
@@ -597,7 +603,7 @@ export function useGeneration(params: UseGenerationParams) {
                     { href: startFrame.href, mimeType: startFrame.mimeType },
                 );
 
-                setProgressMessage('处理视频中...');
+                setProgressMessage('...');
                 const videoUrl = URL.createObjectURL(videoBlob);
                 const video = document.createElement('video');
 
@@ -648,11 +654,11 @@ export function useGeneration(params: UseGenerationParams) {
 
                     setIsLoading(false);
                 };
-                video.onerror = () => { setError('无法加载生成的关键帧视频。'); setIsLoading(false); };
+                video.onerror = () => { setError(''); setIsLoading(false); };
                 video.src = videoUrl;
             } catch (err) {
                 const error = err as Error;
-                setError(`首尾帧动画生成失败: ${error.message}`);
+                setError(`: ${error.message}`);
                 console.error('Keyframe generation failed:', error);
                 setIsLoading(false);
             }
@@ -928,12 +934,14 @@ export function useGeneration(params: UseGenerationParams) {
                     setError('The current image model does not support reference image generation. Please switch to a Gemini or Imagen image model.');
                     return;
                 }
+                // ✅ 修复：getPreferredApiKey 先按 provider 找，找不到就只按 capability 找
+                const imageKey = getPreferredApiKey('image', imageProvider) ?? getPreferredApiKey('image');
                 const result = baseRefs.length > 0
                     ? await editImage(baseRefs, effectivePrompt)
                     : await generateImageWithProvider(
                         effectivePrompt,
                         modelPreference.imageModel,
-                        getPreferredApiKey('image', imageProvider),
+                        imageKey,
                     );
 
                 if (result.newImageBase64 && result.newImageMimeType) {
@@ -972,14 +980,14 @@ export function useGeneration(params: UseGenerationParams) {
             }
         } catch (err) {
             const error = err as Error;
-            let friendlyMessage = `生成出错: ${error.message}`;
+            let friendlyMessage = `: ${error.message}`;
 
             if (error.message && (error.message.includes('API_KEY_INVALID') || error.message.includes('API key not valid'))) {
-                friendlyMessage = 'API Key 无效。请打开设置，检查或重新添加你的 API Key。';
+                friendlyMessage = 'API Key 无效，请在设置中检查你的 API Key。';
             } else if (error.message && (error.message.includes('429') || error.message.toUpperCase().includes('RESOURCE_EXHAUSTED'))) {
-                friendlyMessage = 'API 调用配额已用完。请检查你的 Google AI Studio 计划，或稍后重试。';
+                friendlyMessage = 'API 调用配额已用完，请稍后重试或更换 Key。';
             } else if (error.message && (error.message.includes('not configured') || error.message.includes('not set'))) {
-                friendlyMessage = '未配置 API Key。请先打开设置 → API 配置，添加你的 API Key。';
+                friendlyMessage = '未配置 API Key，请在设置中添加。';
             }
 
             setError(friendlyMessage);
@@ -1007,27 +1015,26 @@ export function useGeneration(params: UseGenerationParams) {
         const rawPrompt = prompt.trim();
         if (!rawPrompt || batchCount <= 1) return;
 
-        const imageProvider = inferProviderFromModel(modelPreference.imageModel);
-        const hasKey = userApiKeys.some(k => {
-            const caps = k.capabilities?.length ? k.capabilities : inferCapabilitiesByProvider(k.provider);
-            return caps.includes('image') && k.provider === imageProvider;
-        });
-        if (!hasKey) {
-            setError('未找到可用于图片生成的 API Key。');
+        // ✅ 修复：只检查 capability，不检查 provider
+        if (!checkHasKey('image')) {
+            setError('未配置图片生成 API Key，请在设置中添加。');
             setIsSettingsPanelOpen(true);
             return;
         }
 
         setIsLoading(true);
         setError(null);
-        setProgressMessage(`正在批量生成 ${batchCount} 张方案...`);
+        setProgressMessage(` ${batchCount} ...`);
+
+        const imageProvider = inferProviderFromModel(modelPreference.imageModel);
 
         try {
             const tasks = Array.from({ length: batchCount }, (_, i) =>
                 generateImageWithProvider(
                     rawPrompt + (i > 0 ? ` (variation ${i + 1})` : ''),
                     modelPreference.imageModel,
-                    getPreferredApiKey('image', imageProvider),
+                    // ✅ 修复：先按 provider 找，找不到就只按 capability 找
+                    getPreferredApiKey('image', imageProvider) ?? getPreferredApiKey('image'),
                 ).catch(() => null)
             );
             const results = await Promise.all(tasks);
@@ -1047,13 +1054,13 @@ export function useGeneration(params: UseGenerationParams) {
             }
 
             if (images.length === 0) {
-                setError('批量生成失败，所有请求均未返回图片。');
+                setError('批量生成失败，未返回任何图片。');
             } else {
                 setBatchResults({ prompt: rawPrompt, images });
-                setProgressMessage(`生成完成: ${images.length}/${batchCount} 张成功`);
+                setProgressMessage(`完成：${images.length}/${batchCount} 张`);
             }
         } catch (err) {
-            setError(`批量生成出错: ${(err as Error).message}`);
+            setError(`批量生成失败：${(err as Error).message}`);
         } finally {
             setIsLoading(false);
             setTimeout(() => setProgressMessage(''), 1500);
@@ -1115,11 +1122,9 @@ export function useGeneration(params: UseGenerationParams) {
     };
 
     return {
-        // state
         isEnhancingPrompt,
         batchResults,
         setBatchResults,
-        // handlers
         handleEnhancePrompt,
         saveGenerationToHistory,
         handleSplitImageWithBanana,
