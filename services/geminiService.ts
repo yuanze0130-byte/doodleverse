@@ -365,33 +365,85 @@ export async function editImage(
 export async function generateImageFromText(
   prompt: string,
   apiKey?: string,
-  baseUrl?: string  // ← 新增参数
+  baseUrl?: string
 ): Promise<{
   newImageBase64: string | null;
   newImageMimeType: string | null;
   textResponse: string | null;
 }> {
   const model = runtimeConfig.textToImageModel || runtimeConfig.imageModel || "gemini-3.1-flash-image-preview";
-  try {
-    const data = (await geminiPost(
-      `/v1beta/models/${model}:predict`,  // Imagen 用 :predict 端点
-      {
-        instances: [{ prompt }],
-        parameters: { sampleCount: 1, mimeType: "image/png" },
-      },
-      "image",
-      apiKey,
-      baseUrl
-    )) as {
-      predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
-    };
+  const isImagenModel = /^imagen/i.test(model);
 
-    const prediction = data?.predictions?.[0];
-    if (prediction?.bytesBase64Encoded) {
+  try {
+    if (isImagenModel) {
+      // Imagen 模型：用 :predict 接口
+      const data = (await geminiPost(
+        `/v1beta/models/${model}:predict`,
+        {
+          instances: [{ prompt }],
+          parameters: { sampleCount: 1, mimeType: "image/png" },
+        },
+        "image",
+        apiKey,
+        baseUrl
+      )) as {
+        predictions?: Array<{ bytesBase64Encoded?: string; mimeType?: string }>;
+      };
+
+      const prediction = data?.predictions?.[0];
+      if (prediction?.bytesBase64Encoded) {
+        return {
+          newImageBase64: prediction.bytesBase64Encoded,
+          newImageMimeType: prediction.mimeType || "image/png",
+          textResponse: null,
+        };
+      }
+    } else {
+      // Gemini 模型：用 :generateContent 接口
+      const data = (await geminiPost(
+        `/v1beta/models/${model}:generateContent`,
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
+        },
+        "image",
+        apiKey,
+        baseUrl
+      )) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              inlineData?: { data: string; mimeType: string };
+              text?: string;
+            }>;
+          };
+          finishReason?: string;
+        }>;
+      };
+
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      let newImageBase64: string | null = null;
+      let newImageMimeType: string | null = null;
+      let textResponse: string | null = null;
+
+      for (const part of parts) {
+        if (part.inlineData) {
+          newImageBase64 = part.inlineData.data;
+          newImageMimeType = part.inlineData.mimeType;
+        } else if (part.text) {
+          textResponse = part.text;
+        }
+      }
+
+      if (newImageBase64) {
+        return { newImageBase64, newImageMimeType, textResponse };
+      }
+
+      const reason = data?.candidates?.[0]?.finishReason || "unknown";
       return {
-        newImageBase64: prediction.bytesBase64Encoded,
-        newImageMimeType: prediction.mimeType || "image/png",
-        textResponse: null,
+        newImageBase64: null,
+        newImageMimeType: null,
+        textResponse: textResponse || `AI 未生成图片（原因：${reason}），请换一个提示词试试。`,
       };
     }
 
@@ -405,6 +457,7 @@ export async function generateImageFromText(
     throw error instanceof Error ? error : new Error("调用文本生图 API 时发生未知错误。");
   }
 }
+
 
 // ============ 视频生成（Veo） ============
 
